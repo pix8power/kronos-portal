@@ -8,6 +8,8 @@ const timeCorrectionSchema = new mongoose.Schema(
     originalClockOut: { type: String, default: '' }, // HH:MM
     correctedClockIn: { type: String, required: true },
     correctedClockOut: { type: String, required: true },
+    lunchOut: { type: String, default: '' }, // HH:MM
+    lunchIn: { type: String, default: '' },  // HH:MM
     reason: { type: String, required: true },
     status: {
       type: String,

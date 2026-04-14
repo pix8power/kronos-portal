@@ -25,7 +25,7 @@ router.get('/', auth, async (req, res) => {
 // Submit a new correction request
 router.post('/', auth, async (req, res) => {
   try {
-    const { date, originalClockIn, originalClockOut, correctedClockIn, correctedClockOut, reason } =
+    const { date, originalClockIn, originalClockOut, correctedClockIn, correctedClockOut, lunchOut, lunchIn, reason } =
       req.body;
 
     const request = await TimeCorrection.create({
@@ -35,6 +35,8 @@ router.post('/', auth, async (req, res) => {
       originalClockOut,
       correctedClockIn,
       correctedClockOut,
+      lunchOut,
+      lunchIn,
       reason,
     });
 

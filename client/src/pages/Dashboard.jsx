@@ -36,6 +36,8 @@ function TimeCorrectionTab({ user }) {
     originalClockOut: '',
     correctedClockIn: '',
     correctedClockOut: '',
+    lunchOut: '',
+    lunchIn: '',
     reason: '',
   });
 
@@ -60,6 +62,7 @@ function TimeCorrectionTab({ user }) {
         date: format(new Date(), 'yyyy-MM-dd'),
         originalClockIn: '', originalClockOut: '',
         correctedClockIn: '', correctedClockOut: '',
+        lunchOut: '', lunchIn: '',
         reason: '',
       });
     } finally {
@@ -179,6 +182,24 @@ function TimeCorrectionTab({ user }) {
                   className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
                 />
               </div>
+              <div>
+                <label className="block text-xs font-medium text-gray-600 mb-1">Lunch Out</label>
+                <input
+                  type="time"
+                  value={form.lunchOut}
+                  onChange={(e) => setForm({ ...form, lunchOut: e.target.value })}
+                  className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-gray-600 mb-1">Lunch In</label>
+                <input
+                  type="time"
+                  value={form.lunchIn}
+                  onChange={(e) => setForm({ ...form, lunchIn: e.target.value })}
+                  className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                />
+              </div>
             </div>
 
             <div>
@@ -281,6 +302,14 @@ function TimeCorrectionTab({ user }) {
                     {req.correctedClockIn} → {req.correctedClockOut}
                   </p>
                 </div>
+                {(req.lunchOut || req.lunchIn) && (
+                  <div className="col-span-2 bg-orange-50 rounded-lg p-3">
+                    <p className="text-xs font-medium text-orange-600 mb-1">Lunch Break</p>
+                    <p className="text-sm font-semibold text-orange-700">
+                      Out: {req.lunchOut || '—'} &nbsp;·&nbsp; In: {req.lunchIn || '—'}
+                    </p>
+                  </div>
+                )}
               </div>
 
               {/* Reason */}
