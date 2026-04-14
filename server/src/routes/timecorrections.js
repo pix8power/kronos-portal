@@ -3,9 +3,9 @@ const TimeCorrection = require('../models/TimeCorrection');
 const User = require('../models/User');
 const Conversation = require('../models/Conversation');
 const Message = require('../models/Message');
-const { auth, isAdmin } = require('../middleware/auth');
+const { auth } = require('../middleware/auth');
 
-// Convert HH:MM (24h) to h:MM AM/PM
+// Convert HH:MM (24h) → h:MM AM/PM
 const to12h = (t) => {
   if (!t) return '—';
   const [h, m] = t.split(':').map(Number);
@@ -14,12 +14,10 @@ const to12h = (t) => {
   return `${hour}:${m.toString().padStart(2, '0')} ${ampm}`;
 };
 
-// Get requests — employees see own, admins/managers see all
+// GET — employees see own; admin/manager see all
 router.get('/', auth, async (req, res) => {
   try {
-    const query =
-      req.user.role === 'employee' ? { employee: req.user._id } : {};
-
+    const query = req.user.role === 'employee' ? { employee: req.user._id } : {};
     const { status } = req.query;
     if (status) query.status = status;
 
@@ -34,55 +32,45 @@ router.get('/', auth, async (req, res) => {
   }
 });
 
-// Submit a new correction request
+// POST — submit a new correction
 router.post('/', auth, async (req, res) => {
   try {
-    const {
-      date, originalClockIn, originalClockOut,
-      correctedClockIn, correctedClockOut,
-      lunchOut, lunchIn, reason,
-    } = req.body;
+    const { entries, reason } = req.body;
+
+    if (!entries || entries.length === 0) {
+      return res.status(400).json({ message: 'At least one entry is required.' });
+    }
 
     const request = await TimeCorrection.create({
       employee: req.user._id,
-      date,
-      originalClockIn,
-      originalClockOut,
-      correctedClockIn,
-      correctedClockOut,
-      lunchOut,
-      lunchIn,
+      entries,
       reason,
     });
 
     const populated = await request.populate('employee', 'name email color position');
 
-    // ── Notify all managers/admins via a direct message ──────────────────────
+    // ── Notify managers/admins via direct message ─────────────────────────────
     try {
       const io = req.app.get('io');
       const managers = await User.find({ role: { $in: ['admin', 'manager'] } });
 
-      const lunchLine = (lunchOut || lunchIn)
-        ? `\nLunch Break:      Out ${to12h(lunchOut)}  |  In ${to12h(lunchIn)}`
-        : '';
+      const entryLines = entries
+        .filter((e) => e.date || e.clockIn || e.clockOut)
+        .map((e) =>
+          `  ${e.date || '—'}  |  In: ${to12h(e.clockIn)}  |  Lunch Out: ${to12h(e.lunchOut)}  |  Lunch In: ${to12h(e.lunchIn)}  |  Out: ${to12h(e.clockOut)}`
+        )
+        .join('\n');
 
       const msgContent =
         `📋 Time Correction Request from ${req.user.name}\n\n` +
-        `Date: ${date}\n\n` +
-        `Original Time:\n` +
-        `  Clock In:  ${to12h(originalClockIn)}\n` +
-        `  Clock Out: ${to12h(originalClockOut)}\n\n` +
-        `Corrected Time:\n` +
-        `  Clock In:  ${to12h(correctedClockIn)}\n` +
-        `  Clock Out: ${to12h(correctedClockOut)}` +
-        lunchLine +
+        `Date       | Clock In  | Lunch Out | Lunch In  | Clock Out\n` +
+        `─────────────────────────────────────────────────────\n` +
+        entryLines +
         `\n\nReason: ${reason}`;
 
       for (const manager of managers) {
-        // Don't message yourself if the submitter is also a manager
         if (manager._id.toString() === req.user._id.toString()) continue;
 
-        // Find or create a direct conversation between employee and manager
         let conv = await Conversation.findOne({
           isGroup: false,
           participants: { $all: [req.user._id, manager._id], $size: 2 },
@@ -105,16 +93,13 @@ router.post('/', auth, async (req, res) => {
         });
 
         await Conversation.findByIdAndUpdate(conv._id, { lastMessage: msg._id });
-
         const populatedMsg = await msg.populate('sender', 'name email avatar color');
 
         if (io) {
-          // Push to manager's personal room (they receive it wherever they are)
           io.to(manager._id.toString()).emit('messageNotification', {
             conversationId: conv._id,
             message: populatedMsg,
           });
-          // Push into the conversation room if manager has it open
           io.to(`conv:${conv._id}`).emit('newMessage', {
             conversationId: conv._id,
             message: populatedMsg,
@@ -122,7 +107,6 @@ router.post('/', auth, async (req, res) => {
         }
       }
     } catch (notifyErr) {
-      // Don't fail the request just because notification failed
       console.error('Manager notification error:', notifyErr.message);
     }
     // ─────────────────────────────────────────────────────────────────────────
@@ -133,12 +117,12 @@ router.post('/', auth, async (req, res) => {
   }
 });
 
-// Review (approve / deny) — admin/manager only
+// PATCH — approve / deny (admin/manager only)
 router.patch('/:id', auth, async (req, res) => {
   try {
     const { role, name } = req.user;
     if (role !== 'admin' && role !== 'manager') {
-      console.warn(`[TimeCorrectionReview] Denied: user "${name}" has role "${role}"`);
+      console.warn(`[TimeCorrectionReview] Denied: "${name}" has role "${role}"`);
       return res.status(403).json({
         message: `Access denied — your account role is "${role}". Only admin or manager can review corrections.`,
       });
@@ -166,7 +150,7 @@ router.patch('/:id', auth, async (req, res) => {
   }
 });
 
-// Delete own pending request
+// DELETE — employee deletes own pending request
 router.delete('/:id', auth, async (req, res) => {
   try {
     const request = await TimeCorrection.findOne({

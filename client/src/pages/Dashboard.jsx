@@ -28,29 +28,25 @@ const STATUS_BADGE = {
   denied:   'bg-red-100    text-red-700',
 };
 
+const emptyEntry = () => ({ date: '', clockIn: '', lunchOut: '', lunchIn: '', clockOut: '' });
+const INPUT_CLS = 'w-full px-2 py-1.5 text-xs border border-gray-300 rounded focus:outline-none focus:ring-1 focus:ring-blue-500 bg-white';
+const TH_CLS   = 'px-3 py-2 text-xs font-semibold text-gray-600 bg-gray-50 border-b border-gray-200 whitespace-nowrap';
+const TD_CLS   = 'px-2 py-1.5 border-b border-gray-100';
+
 // ── Time Correction tab ───────────────────────────────────────────────────────
 function TimeCorrectionTab({ user }) {
   const isAdmin = user?.role === 'admin' || user?.role === 'manager';
 
-  const [requests, setRequests]     = useState([]);
-  const [loading, setLoading]       = useState(true);
-  const [showForm, setShowForm]     = useState(false);
-  const [filterStatus, setFilter]   = useState('');
+  const [requests, setRequests]   = useState([]);
+  const [loading, setLoading]     = useState(true);
+  const [showForm, setShowForm]   = useState(false);
+  const [filterStatus, setFilter] = useState('');
   const [submitting, setSubmitting] = useState(false);
-  // Per-request review state
-  const [reviewNotes, setReviewNotes]   = useState({}); // { [reqId]: string }
-  const [reviewing, setReviewing]       = useState(null); // reqId currently being saved
-  const [reviewError, setReviewError]   = useState(null); // error message
-  const [form, setForm] = useState({
-    date: format(new Date(), 'yyyy-MM-dd'),
-    originalClockIn: '',
-    originalClockOut: '',
-    correctedClockIn: '',
-    correctedClockOut: '',
-    lunchOut: '',
-    lunchIn: '',
-    reason: '',
-  });
+  const [reason, setReason]       = useState('');
+  const [entries, setEntries]     = useState([emptyEntry(), emptyEntry(), emptyEntry(), emptyEntry()]);
+  const [reviewNotes, setReviewNotes] = useState({});
+  const [reviewing, setReviewing]     = useState(null);
+  const [reviewError, setReviewError] = useState(null);
 
   const load = () => {
     setLoading(true);
@@ -59,23 +55,22 @@ function TimeCorrectionTab({ user }) {
       .then((res) => setRequests(res.data))
       .finally(() => setLoading(false));
   };
-
   useEffect(() => { load(); }, [filterStatus]);
+
+  const updateEntry = (i, field, val) =>
+    setEntries((prev) => prev.map((e, idx) => idx === i ? { ...e, [field]: val } : e));
 
   const handleSubmit = async (e) => {
     e.preventDefault();
+    const filled = entries.filter((en) => en.clockIn || en.clockOut || en.date);
+    if (filled.length === 0) return alert('Please fill in at least one row.');
     setSubmitting(true);
     try {
-      const res = await timeCorrectionAPI.submit(form);
+      const res = await timeCorrectionAPI.submit({ entries: filled, reason });
       setRequests((prev) => [res.data, ...prev]);
       setShowForm(false);
-      setForm({
-        date: format(new Date(), 'yyyy-MM-dd'),
-        originalClockIn: '', originalClockOut: '',
-        correctedClockIn: '', correctedClockOut: '',
-        lunchOut: '', lunchIn: '',
-        reason: '',
-      });
+      setEntries([emptyEntry(), emptyEntry(), emptyEntry(), emptyEntry()]);
+      setReason('');
     } finally {
       setSubmitting(false);
     }
@@ -85,15 +80,11 @@ function TimeCorrectionTab({ user }) {
     setReviewing(id + status);
     setReviewError(null);
     try {
-      const res = await timeCorrectionAPI.review(id, {
-        status,
-        reviewNote: reviewNotes[id] || '',
-      });
+      const res = await timeCorrectionAPI.review(id, { status, reviewNote: reviewNotes[id] || '' });
       setRequests((prev) => prev.map((r) => (r._id === id ? res.data : r)));
       setReviewNotes((prev) => { const n = { ...prev }; delete n[id]; return n; });
     } catch (err) {
-      const msg = err.response?.data?.message || err.message || 'Failed to update request';
-      setReviewError(msg);
+      setReviewError(err.response?.data?.message || err.message || 'Failed to update request');
     } finally {
       setReviewing(null);
     }
@@ -122,9 +113,7 @@ function TimeCorrectionTab({ user }) {
             </span>
           )}
         </div>
-
         <div className="flex items-center gap-2">
-          {/* Status filter */}
           <select
             value={filterStatus}
             onChange={(e) => setFilter(e.target.value)}
@@ -135,9 +124,8 @@ function TimeCorrectionTab({ user }) {
             <option value="approved">Approved</option>
             <option value="denied">Denied</option>
           </select>
-
           <button
-            onClick={() => setShowForm(true)}
+            onClick={() => setShowForm((v) => !v)}
             className="flex items-center gap-1.5 bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors"
           >
             <Plus className="h-4 w-4" />
@@ -146,113 +134,91 @@ function TimeCorrectionTab({ user }) {
         </div>
       </div>
 
-      {/* Submit form */}
+      {/* ── Submission form ─────────────────────────────────────────────────── */}
       {showForm && (
-        <div className="bg-blue-50 border border-blue-100 rounded-xl p-5 mb-5">
-          <h3 className="font-semibold text-gray-900 mb-4">Submit Time Correction</h3>
-          <form onSubmit={handleSubmit} className="space-y-4">
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-              <div>
-                <label className="block text-xs font-medium text-gray-600 mb-1">Date *</label>
-                <input
-                  type="date"
-                  required
-                  value={form.date}
-                  onChange={(e) => setForm({ ...form, date: e.target.value })}
-                  className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-                />
-              </div>
-              <div>
-                <label className="block text-xs font-medium text-gray-600 mb-1">Original Clock-In</label>
-                <input
-                  type="time"
-                  value={form.originalClockIn}
-                  onChange={(e) => setForm({ ...form, originalClockIn: e.target.value })}
-                  className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-                />
-              </div>
-              <div>
-                <label className="block text-xs font-medium text-gray-600 mb-1">Original Clock-Out</label>
-                <input
-                  type="time"
-                  value={form.originalClockOut}
-                  onChange={(e) => setForm({ ...form, originalClockOut: e.target.value })}
-                  className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-                />
-              </div>
-              <div>
-                <label className="block text-xs font-medium text-gray-600 mb-1">Corrected Clock-In *</label>
-                <input
-                  type="time"
-                  required
-                  value={form.correctedClockIn}
-                  onChange={(e) => setForm({ ...form, correctedClockIn: e.target.value })}
-                  className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-                />
-              </div>
-              <div>
-                <label className="block text-xs font-medium text-gray-600 mb-1">Corrected Clock-Out *</label>
-                <input
-                  type="time"
-                  required
-                  value={form.correctedClockOut}
-                  onChange={(e) => setForm({ ...form, correctedClockOut: e.target.value })}
-                  className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-                />
-              </div>
-              <div>
-                <label className="block text-xs font-medium text-gray-600 mb-1">Lunch Out</label>
-                <input
-                  type="time"
-                  value={form.lunchOut}
-                  onChange={(e) => setForm({ ...form, lunchOut: e.target.value })}
-                  className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-                />
-              </div>
-              <div>
-                <label className="block text-xs font-medium text-gray-600 mb-1">Lunch In</label>
-                <input
-                  type="time"
-                  value={form.lunchIn}
-                  onChange={(e) => setForm({ ...form, lunchIn: e.target.value })}
-                  className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-                />
-              </div>
+        <div className="bg-white border border-blue-100 rounded-xl shadow-sm mb-6 overflow-hidden">
+          <div className="bg-blue-600 px-5 py-3">
+            <h3 className="font-semibold text-white text-sm">Time Correction Sheet</h3>
+          </div>
+          <form onSubmit={handleSubmit} className="p-4 space-y-4">
+            {/* Table */}
+            <div className="overflow-x-auto rounded-lg border border-gray-200">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr>
+                    <th className={TH_CLS}>Date</th>
+                    <th className={TH_CLS}>Clock In</th>
+                    <th className={TH_CLS}>Time Out (Lunch)</th>
+                    <th className={TH_CLS}>Time In (Lunch)</th>
+                    <th className={TH_CLS}>Clock Out</th>
+                    <th className={`${TH_CLS} w-8`}></th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {entries.map((en, i) => (
+                    <tr key={i} className={i % 2 === 0 ? 'bg-white' : 'bg-gray-50/50'}>
+                      <td className={TD_CLS}>
+                        <input type="date" value={en.date} onChange={(e) => updateEntry(i, 'date', e.target.value)} className={INPUT_CLS} />
+                      </td>
+                      <td className={TD_CLS}>
+                        <input type="time" value={en.clockIn} onChange={(e) => updateEntry(i, 'clockIn', e.target.value)} className={INPUT_CLS} />
+                      </td>
+                      <td className={TD_CLS}>
+                        <input type="time" value={en.lunchOut} onChange={(e) => updateEntry(i, 'lunchOut', e.target.value)} className={INPUT_CLS} />
+                      </td>
+                      <td className={TD_CLS}>
+                        <input type="time" value={en.lunchIn} onChange={(e) => updateEntry(i, 'lunchIn', e.target.value)} className={INPUT_CLS} />
+                      </td>
+                      <td className={TD_CLS}>
+                        <input type="time" value={en.clockOut} onChange={(e) => updateEntry(i, 'clockOut', e.target.value)} className={INPUT_CLS} />
+                      </td>
+                      <td className={TD_CLS}>
+                        {entries.length > 1 && (
+                          <button type="button" onClick={() => setEntries((prev) => prev.filter((_, idx) => idx !== i))}
+                            className="text-gray-300 hover:text-red-400 transition-colors">
+                            <X className="h-3.5 w-3.5" />
+                          </button>
+                        )}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
             </div>
+
+            <button
+              type="button"
+              onClick={() => setEntries((prev) => [...prev, emptyEntry()])}
+              className="text-xs text-blue-600 hover:underline flex items-center gap-1"
+            >
+              <Plus className="h-3 w-3" /> Add row
+            </button>
 
             <div>
               <label className="block text-xs font-medium text-gray-600 mb-1">Reason *</label>
               <textarea
-                required
-                rows={2}
-                value={form.reason}
-                onChange={(e) => setForm({ ...form, reason: e.target.value })}
+                required rows={2} value={reason}
+                onChange={(e) => setReason(e.target.value)}
                 placeholder="Explain why the time needs to be corrected..."
                 className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none"
               />
             </div>
 
             <div className="flex gap-2">
-              <button
-                type="button"
-                onClick={() => setShowForm(false)}
-                className="px-4 py-2 text-sm border border-gray-300 rounded-lg hover:bg-gray-50"
-              >
+              <button type="button" onClick={() => setShowForm(false)}
+                className="px-4 py-2 text-sm border border-gray-300 rounded-lg hover:bg-gray-50">
                 Cancel
               </button>
-              <button
-                type="submit"
-                disabled={submitting}
-                className="px-4 py-2 text-sm bg-blue-600 hover:bg-blue-700 disabled:bg-blue-400 text-white rounded-lg font-medium"
-              >
-                {submitting ? 'Submitting...' : 'Submit Request'}
+              <button type="submit" disabled={submitting}
+                className="px-4 py-2 text-sm bg-blue-600 hover:bg-blue-700 disabled:bg-blue-400 text-white rounded-lg font-medium">
+                {submitting ? 'Submitting…' : 'Submit Request'}
               </button>
             </div>
           </form>
         </div>
       )}
 
-      {/* Requests list */}
+      {/* ── Requests list ───────────────────────────────────────────────────── */}
       {loading ? (
         <div className="flex justify-center py-12">
           <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600" />
@@ -266,124 +232,99 @@ function TimeCorrectionTab({ user }) {
           </p>
         </div>
       ) : (
-        <div className="space-y-3">
+        <div className="space-y-4">
           {requests.map((req) => (
-            <div
-              key={req._id}
-              className="bg-white rounded-xl border border-gray-100 shadow-sm p-4"
-            >
-              <div className="flex flex-wrap items-start justify-between gap-3">
-                {/* Left: employee + date */}
+            <div key={req._id} className="bg-white rounded-xl border border-gray-100 shadow-sm overflow-hidden">
+              {/* Card header */}
+              <div className="flex flex-wrap items-center justify-between gap-3 px-4 py-3 border-b border-gray-100">
                 <div className="flex items-center gap-3">
                   <div
-                    className="w-9 h-9 rounded-full flex items-center justify-center text-white text-xs font-bold flex-shrink-0"
+                    className="w-8 h-8 rounded-full flex items-center justify-center text-white text-xs font-bold flex-shrink-0"
                     style={{ backgroundColor: req.employee?.color || '#3B82F6' }}
                   >
                     {req.employee?.name?.split(' ').map((n) => n[0]).join('').slice(0, 2)}
                   </div>
                   <div>
                     <p className="font-semibold text-sm text-gray-900">{req.employee?.name}</p>
-                    <p className="text-xs text-gray-500">
-                      {req.employee?.position} · {format(new Date(req.date + 'T00:00:00'), 'MMM d, yyyy')}
-                    </p>
+                    <p className="text-xs text-gray-400">{req.employee?.position}</p>
                   </div>
                 </div>
-
-                {/* Right: status + actions */}
                 <div className="flex items-center gap-2">
                   <span className={`text-xs font-semibold px-2.5 py-1 rounded-full capitalize ${STATUS_BADGE[req.status]}`}>
                     {req.status}
                   </span>
                   {req.status === 'pending' && !isAdmin && req.employee?._id === user?._id && (
-                    <button
-                      onClick={() => handleDelete(req._id)}
-                      className="p-1.5 hover:bg-red-50 text-gray-400 hover:text-red-500 rounded-lg transition-colors"
-                      title="Delete request"
-                    >
+                    <button onClick={() => handleDelete(req._id)}
+                      className="p-1.5 hover:bg-red-50 text-gray-400 hover:text-red-500 rounded-lg" title="Delete">
                       <Trash2 className="h-4 w-4" />
                     </button>
                   )}
                 </div>
               </div>
 
-              {/* Times */}
-              <div className="mt-3 grid grid-cols-2 gap-3">
-                <div className="bg-gray-50 rounded-lg p-3">
-                  <p className="text-xs font-medium text-gray-500 mb-2">Original Time</p>
-                  <p className="text-xs text-gray-500">Clock In</p>
-                  <p className="text-sm font-semibold text-gray-700">{to12h(req.originalClockIn)}</p>
-                  <p className="text-xs text-gray-500 mt-1">Clock Out</p>
-                  <p className="text-sm font-semibold text-gray-700">{to12h(req.originalClockOut)}</p>
-                </div>
-                <div className="bg-blue-50 rounded-lg p-3">
-                  <p className="text-xs font-medium text-blue-600 mb-2">Corrected Time</p>
-                  <p className="text-xs text-blue-500">Clock In</p>
-                  <p className="text-sm font-semibold text-blue-700">{to12h(req.correctedClockIn)}</p>
-                  <p className="text-xs text-blue-500 mt-1">Clock Out</p>
-                  <p className="text-sm font-semibold text-blue-700">{to12h(req.correctedClockOut)}</p>
-                </div>
-                {(req.lunchOut || req.lunchIn) && (
-                  <div className="col-span-2 bg-orange-50 rounded-lg p-3">
-                    <p className="text-xs font-medium text-orange-600 mb-2">Lunch Break</p>
-                    <div className="flex gap-6">
-                      <div>
-                        <p className="text-xs text-orange-400">Lunch Out</p>
-                        <p className="text-sm font-semibold text-orange-700">{to12h(req.lunchOut)}</p>
-                      </div>
-                      <div>
-                        <p className="text-xs text-orange-400">Lunch In</p>
-                        <p className="text-sm font-semibold text-orange-700">{to12h(req.lunchIn)}</p>
-                      </div>
-                    </div>
-                  </div>
+              {/* Entries table */}
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr>
+                      <th className={TH_CLS}>Date</th>
+                      <th className={TH_CLS}>Clock In</th>
+                      <th className={TH_CLS}>Time Out (Lunch)</th>
+                      <th className={TH_CLS}>Time In (Lunch)</th>
+                      <th className={TH_CLS}>Clock Out</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {(req.entries || []).map((en, i) => (
+                      <tr key={i} className={i % 2 === 0 ? 'bg-white' : 'bg-gray-50/40'}>
+                        <td className="px-3 py-2 text-xs text-gray-700 border-b border-gray-100 font-medium">
+                          {en.date ? format(new Date(en.date + 'T00:00:00'), 'MMM d, yyyy') : '—'}
+                        </td>
+                        <td className="px-3 py-2 text-xs text-gray-700 border-b border-gray-100">{to12h(en.clockIn)}</td>
+                        <td className="px-3 py-2 text-xs text-gray-700 border-b border-gray-100">{to12h(en.lunchOut)}</td>
+                        <td className="px-3 py-2 text-xs text-gray-700 border-b border-gray-100">{to12h(en.lunchIn)}</td>
+                        <td className="px-3 py-2 text-xs text-gray-700 border-b border-gray-100">{to12h(en.clockOut)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+
+              {/* Reason + review note */}
+              <div className="px-4 py-3 space-y-2">
+                <p className="text-xs text-gray-600">
+                  <span className="font-semibold text-gray-700">Reason: </span>{req.reason}
+                </p>
+                {req.reviewNote && (
+                  <p className="text-xs text-gray-400 italic">
+                    Note from {req.reviewedBy?.name}: "{req.reviewNote}"
+                  </p>
                 )}
               </div>
 
-              {/* Reason */}
-              <p className="mt-3 text-sm text-gray-600 bg-gray-50 rounded-lg px-3 py-2">
-                <span className="font-medium text-gray-700">Reason: </span>{req.reason}
-              </p>
-
-              {/* Review note (if reviewed) */}
-              {req.reviewNote && (
-                <p className="mt-2 text-xs text-gray-500 italic px-1">
-                  Note from {req.reviewedBy?.name}: "{req.reviewNote}"
-                </p>
-              )}
-
               {/* Admin review actions */}
               {isAdmin && req.status === 'pending' && (
-                <div className="mt-3 space-y-2">
+                <div className="px-4 pb-4 space-y-2">
                   {reviewError && reviewing === null && (
-                    <p className="text-xs text-red-600 bg-red-50 rounded-lg px-3 py-2">
-                      Error: {reviewError}
-                    </p>
+                    <p className="text-xs text-red-600 bg-red-50 rounded-lg px-3 py-2">Error: {reviewError}</p>
                   )}
                   <div className="flex flex-wrap items-center gap-2">
                     <input
                       type="text"
                       value={reviewNotes[req._id] || ''}
-                      onChange={(e) =>
-                        setReviewNotes((prev) => ({ ...prev, [req._id]: e.target.value }))
-                      }
-                      placeholder="Optional note..."
+                      onChange={(e) => setReviewNotes((prev) => ({ ...prev, [req._id]: e.target.value }))}
+                      placeholder="Optional note…"
                       className="flex-1 min-w-[160px] px-3 py-1.5 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
                     />
-                    <button
-                      onClick={() => handleReview(req._id, 'approved')}
-                      disabled={!!reviewing}
-                      className="flex items-center gap-1 px-3 py-1.5 text-sm bg-green-600 hover:bg-green-700 disabled:opacity-50 text-white rounded-lg font-medium"
-                    >
+                    <button onClick={() => handleReview(req._id, 'approved')} disabled={!!reviewing}
+                      className="flex items-center gap-1 px-3 py-1.5 text-sm bg-green-600 hover:bg-green-700 disabled:opacity-50 text-white rounded-lg font-medium">
                       {reviewing === req._id + 'approved'
                         ? <span className="animate-spin rounded-full h-3 w-3 border-b-2 border-white" />
                         : <Check className="h-3.5 w-3.5" />}
                       Approve
                     </button>
-                    <button
-                      onClick={() => handleReview(req._id, 'denied')}
-                      disabled={!!reviewing}
-                      className="flex items-center gap-1 px-3 py-1.5 text-sm bg-red-600 hover:bg-red-700 disabled:opacity-50 text-white rounded-lg font-medium"
-                    >
+                    <button onClick={() => handleReview(req._id, 'denied')} disabled={!!reviewing}
+                      className="flex items-center gap-1 px-3 py-1.5 text-sm bg-red-600 hover:bg-red-700 disabled:opacity-50 text-white rounded-lg font-medium">
                       {reviewing === req._id + 'denied'
                         ? <span className="animate-spin rounded-full h-3 w-3 border-b-2 border-white" />
                         : <X className="h-3.5 w-3.5" />}
