@@ -19,6 +19,7 @@ const LEAVE_TYPES = [
   { value: 'vacation',    label: 'Vacation / PTO',      color: 'bg-blue-100 text-blue-700' },
   { value: 'educational', label: 'Educational Leave',   color: 'bg-purple-100 text-purple-700' },
   { value: 'bereavement', label: 'Bereavement Leave',   color: 'bg-gray-100 text-gray-700' },
+  { value: 'other',       label: 'Other',               color: 'bg-orange-100 text-orange-700' },
 ];
 
 const leaveLabel = (v) => LEAVE_TYPES.find((t) => t.value === v)?.label || v;
@@ -505,6 +506,7 @@ function TimeOffTab({ user }) {
                       {value === 'vacation'    && 'Paid time away for rest or travel'}
                       {value === 'educational' && 'School, training, or certification'}
                       {value === 'bereavement' && 'Loss of a family member'}
+                      {value === 'other'       && 'Any other reason not listed above'}
                     </p>
                   </button>
                 ))}
