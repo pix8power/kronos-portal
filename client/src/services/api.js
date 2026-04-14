@@ -41,9 +41,10 @@ export const schedulesAPI = {
   createShift: (data) => api.post('/schedules/shifts', data),
   updateShift: (id, data) => api.put(`/schedules/shifts/${id}`, data),
   deleteShift: (id) => api.delete(`/schedules/shifts/${id}`),
-  getTimeOff: () => api.get('/schedules/timeoff'),
+  getTimeOff: (params) => api.get('/schedules/timeoff', { params }),
   requestTimeOff: (data) => api.post('/schedules/timeoff', data),
   reviewTimeOff: (id, data) => api.patch(`/schedules/timeoff/${id}`, data),
+  deleteTimeOff: (id) => api.delete(`/schedules/timeoff/${id}`),
 };
 
 export const messagesAPI = {

@@ -6,12 +6,23 @@ import {
   AlarmClockPlus, Plus, Check, X, Trash2, AlertCircle,
 } from 'lucide-react';
 import { schedulesAPI, usersAPI, messagesAPI, timeCorrectionAPI } from '../services/api';
+import { differenceInCalendarDays, parseISO } from 'date-fns';
 import { useAuth } from '../contexts/AuthContext';
 
 const TABS = [
-  { key: 'overview', label: 'Overview' },
+  { key: 'overview',       label: 'Overview' },
+  { key: 'timeoff',        label: 'Time Off' },
   { key: 'timecorrection', label: 'Time Correction' },
 ];
+
+const LEAVE_TYPES = [
+  { value: 'vacation',    label: 'Vacation / PTO',      color: 'bg-blue-100 text-blue-700' },
+  { value: 'educational', label: 'Educational Leave',   color: 'bg-purple-100 text-purple-700' },
+  { value: 'bereavement', label: 'Bereavement Leave',   color: 'bg-gray-100 text-gray-700' },
+];
+
+const leaveLabel = (v) => LEAVE_TYPES.find((t) => t.value === v)?.label || v;
+const leaveColor = (v) => LEAVE_TYPES.find((t) => t.value === v)?.color || 'bg-gray-100 text-gray-600';
 
 // Convert HH:MM (24h) to h:MM AM/PM
 const to12h = (t) => {
@@ -351,6 +362,346 @@ function TimeCorrectionTab({ user }) {
   );
 }
 
+// ── Time Off tab ──────────────────────────────────────────────────────────────
+function TimeOffTab({ user }) {
+  const isAdmin = user?.role === 'admin' || user?.role === 'manager';
+
+  const [requests, setRequests]   = useState([]);
+  const [loading, setLoading]     = useState(true);
+  const [showForm, setShowForm]   = useState(false);
+  const [filterStatus, setFilter] = useState('');
+  const [submitting, setSubmitting] = useState(false);
+  const [submitError, setSubmitError] = useState('');
+  const [reviewNotes, setReviewNotes] = useState({});
+  const [reviewing, setReviewing]     = useState(null);
+  const [reviewError, setReviewError] = useState(null);
+
+  const [form, setForm] = useState({
+    type: 'vacation',
+    startDate: '',
+    endDate: '',
+    reason: '',
+  });
+
+  const load = () => {
+    setLoading(true);
+    schedulesAPI
+      .getTimeOff(filterStatus ? { status: filterStatus } : {})
+      .then((res) => setRequests(res.data))
+      .finally(() => setLoading(false));
+  };
+  useEffect(() => { load(); }, [filterStatus]);
+
+  const dayCount = (s, e) => {
+    if (!s || !e) return null;
+    const d = differenceInCalendarDays(parseISO(e), parseISO(s)) + 1;
+    return d > 0 ? d : null;
+  };
+
+  const handleSubmit = async (ev) => {
+    ev.preventDefault();
+    setSubmitError('');
+    const { type, startDate, endDate, reason } = form;
+    if (!startDate || !endDate) { setSubmitError('Please select start and end dates.'); return; }
+    if (endDate < startDate)    { setSubmitError('End date cannot be before start date.'); return; }
+    if (!reason.trim())         { setSubmitError('Please provide a reason for your request.'); return; }
+    setSubmitting(true);
+    try {
+      const res = await schedulesAPI.requestTimeOff({ type, startDate, endDate, reason: reason.trim() });
+      setRequests((prev) => [res.data, ...prev]);
+      setShowForm(false);
+      setForm({ type: 'vacation', startDate: '', endDate: '', reason: '' });
+    } catch (err) {
+      setSubmitError(err.response?.data?.message || err.message || 'Failed to submit request.');
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const handleReview = async (id, status) => {
+    setReviewing(id + status);
+    setReviewError(null);
+    try {
+      const res = await schedulesAPI.reviewTimeOff(id, { status, reviewNote: reviewNotes[id] || '' });
+      setRequests((prev) => prev.map((r) => (r._id === id ? res.data : r)));
+      setReviewNotes((prev) => { const n = { ...prev }; delete n[id]; return n; });
+    } catch (err) {
+      setReviewError(err.response?.data?.message || err.message || 'Failed to update request.');
+    } finally {
+      setReviewing(null);
+    }
+  };
+
+  const handleDelete = async (id) => {
+    if (!confirm('Cancel this time off request?')) return;
+    await schedulesAPI.deleteTimeOff(id);
+    setRequests((prev) => prev.filter((r) => r._id !== id));
+  };
+
+  const pending = requests.filter((r) => r.status === 'pending').length;
+
+  return (
+    <div>
+      {/* Sub-header */}
+      <div className="flex flex-wrap items-center justify-between gap-3 mb-5">
+        <div className="flex items-center gap-3">
+          <h2 className="text-lg font-bold text-gray-900 flex items-center gap-2">
+            <Calendar className="h-5 w-5 text-blue-600" />
+            Time Off Requests
+          </h2>
+          {isAdmin && pending > 0 && (
+            <span className="bg-yellow-100 text-yellow-700 text-xs font-semibold px-2 py-0.5 rounded-full">
+              {pending} pending
+            </span>
+          )}
+        </div>
+        <div className="flex items-center gap-2">
+          <select
+            value={filterStatus}
+            onChange={(e) => setFilter(e.target.value)}
+            className="px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+          >
+            <option value="">All Statuses</option>
+            <option value="pending">Pending</option>
+            <option value="approved">Approved</option>
+            <option value="denied">Denied</option>
+          </select>
+          <button
+            onClick={() => { setShowForm((v) => !v); setSubmitError(''); }}
+            className="flex items-center gap-1.5 bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors"
+          >
+            <Plus className="h-4 w-4" />
+            New Request
+          </button>
+        </div>
+      </div>
+
+      {/* ── Request form ────────────────────────────────────────────────────── */}
+      {showForm && (
+        <div className="bg-white border border-blue-100 rounded-xl shadow-sm mb-6 overflow-hidden">
+          <div className="bg-blue-600 px-5 py-3">
+            <h3 className="font-semibold text-white text-sm">New Time Off Request</h3>
+          </div>
+          <form onSubmit={handleSubmit} className="p-5 space-y-4">
+            {/* Leave type cards */}
+            <div>
+              <label className="block text-xs font-medium text-gray-600 mb-2">Leave Type</label>
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                {LEAVE_TYPES.map(({ value, label, color }) => (
+                  <button
+                    key={value}
+                    type="button"
+                    onClick={() => setForm((f) => ({ ...f, type: value }))}
+                    className={`px-4 py-3 rounded-xl border-2 text-sm font-medium text-left transition-all ${
+                      form.type === value
+                        ? 'border-blue-500 bg-blue-50 text-blue-700 shadow-sm'
+                        : 'border-gray-200 bg-white text-gray-600 hover:border-gray-300'
+                    }`}
+                  >
+                    <span className={`inline-block text-xs px-2 py-0.5 rounded-full font-semibold mb-1 ${color}`}>
+                      {label}
+                    </span>
+                    <p className="text-xs text-gray-400 mt-0.5">
+                      {value === 'vacation'    && 'Paid time away for rest or travel'}
+                      {value === 'educational' && 'School, training, or certification'}
+                      {value === 'bereavement' && 'Loss of a family member'}
+                    </p>
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Date range */}
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <label className="block text-xs font-medium text-gray-600 mb-1">Start Date</label>
+                <input
+                  type="date"
+                  value={form.startDate}
+                  onChange={(e) => setForm((f) => ({ ...f, startDate: e.target.value }))}
+                  className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-gray-600 mb-1">End Date</label>
+                <input
+                  type="date"
+                  value={form.endDate}
+                  min={form.startDate}
+                  onChange={(e) => setForm((f) => ({ ...f, endDate: e.target.value }))}
+                  className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                />
+              </div>
+            </div>
+
+            {/* Day count preview */}
+            {form.startDate && form.endDate && dayCount(form.startDate, form.endDate) && (
+              <p className="text-xs text-blue-600 font-medium -mt-2">
+                {dayCount(form.startDate, form.endDate)} day{dayCount(form.startDate, form.endDate) !== 1 ? 's' : ''} requested
+              </p>
+            )}
+
+            {/* Reason */}
+            <div>
+              <label className="block text-xs font-medium text-gray-600 mb-1">Reason</label>
+              <textarea
+                rows={2}
+                value={form.reason}
+                onChange={(e) => { setForm((f) => ({ ...f, reason: e.target.value })); setSubmitError(''); }}
+                placeholder="Briefly describe your reason..."
+                className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none"
+              />
+            </div>
+
+            {submitError && (
+              <div className="bg-red-50 border border-red-200 text-red-700 text-sm rounded-lg px-4 py-2">
+                {submitError}
+              </div>
+            )}
+
+            <div className="flex gap-2">
+              <button
+                type="button"
+                onClick={() => { setShowForm(false); setSubmitError(''); }}
+                className="px-4 py-2 text-sm border border-gray-300 rounded-lg hover:bg-gray-50"
+              >
+                Cancel
+              </button>
+              <button
+                type="submit"
+                disabled={submitting}
+                className="px-4 py-2 text-sm bg-blue-600 hover:bg-blue-700 disabled:bg-blue-400 text-white rounded-lg font-medium"
+              >
+                {submitting ? 'Submitting…' : 'Submit Request'}
+              </button>
+            </div>
+          </form>
+        </div>
+      )}
+
+      {/* ── Requests list ───────────────────────────────────────────────────── */}
+      {loading ? (
+        <div className="flex justify-center py-12">
+          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600" />
+        </div>
+      ) : requests.length === 0 ? (
+        <div className="text-center py-16 text-gray-400">
+          <Calendar className="h-10 w-10 mx-auto mb-3 opacity-30" />
+          <p className="font-medium">No time off requests</p>
+          <p className="text-sm mt-1">
+            {filterStatus ? `No ${filterStatus} requests found` : 'Submit a request to schedule time away'}
+          </p>
+        </div>
+      ) : (
+        <div className="space-y-3">
+          {requests.map((req) => {
+            const days = dayCount(req.startDate, req.endDate);
+            return (
+              <div key={req._id} className="bg-white rounded-xl border border-gray-100 shadow-sm overflow-hidden">
+                <div className="flex flex-wrap items-center justify-between gap-3 px-4 py-3">
+                  {/* Employee + leave type */}
+                  <div className="flex items-center gap-3">
+                    <div
+                      className="w-9 h-9 rounded-full flex items-center justify-center text-white text-xs font-bold flex-shrink-0"
+                      style={{ backgroundColor: req.employee?.color || '#3B82F6' }}
+                    >
+                      {req.employee?.name?.split(' ').map((n) => n[0]).join('').slice(0, 2)}
+                    </div>
+                    <div>
+                      <p className="font-semibold text-sm text-gray-900">{req.employee?.name}</p>
+                      <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${leaveColor(req.type)}`}>
+                        {leaveLabel(req.type)}
+                      </span>
+                    </div>
+                  </div>
+
+                  {/* Dates + status */}
+                  <div className="flex items-center gap-3 flex-wrap">
+                    <div className="text-right">
+                      <p className="text-sm font-medium text-gray-800">
+                        {format(parseISO(req.startDate), 'MMM d')}
+                        {req.startDate !== req.endDate && ` – ${format(parseISO(req.endDate), 'MMM d, yyyy')}`}
+                        {req.startDate === req.endDate && `, ${format(parseISO(req.startDate), 'yyyy')}`}
+                      </p>
+                      {days && (
+                        <p className="text-xs text-gray-400">{days} day{days !== 1 ? 's' : ''}</p>
+                      )}
+                    </div>
+                    <span className={`text-xs font-semibold px-2.5 py-1 rounded-full capitalize ${STATUS_BADGE[req.status]}`}>
+                      {req.status}
+                    </span>
+                    {req.status === 'pending' && !isAdmin && req.employee?._id === user?._id && (
+                      <button
+                        onClick={() => handleDelete(req._id)}
+                        className="p-1.5 hover:bg-red-50 text-gray-400 hover:text-red-500 rounded-lg"
+                        title="Cancel request"
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </button>
+                    )}
+                  </div>
+                </div>
+
+                {/* Reason */}
+                {req.reason && (
+                  <div className="px-4 pb-3 border-t border-gray-50 pt-2">
+                    <p className="text-xs text-gray-500">
+                      <span className="font-semibold text-gray-600">Reason: </span>{req.reason}
+                    </p>
+                    {req.reviewNote && (
+                      <p className="text-xs text-gray-400 italic mt-1">
+                        Note from {req.reviewedBy?.name}: "{req.reviewNote}"
+                      </p>
+                    )}
+                  </div>
+                )}
+
+                {/* Admin review */}
+                {isAdmin && req.status === 'pending' && (
+                  <div className="px-4 pb-4 pt-2 border-t border-gray-50 space-y-2">
+                    {reviewError && reviewing === null && (
+                      <p className="text-xs text-red-600 bg-red-50 rounded-lg px-3 py-2">{reviewError}</p>
+                    )}
+                    <div className="flex flex-wrap items-center gap-2">
+                      <input
+                        type="text"
+                        value={reviewNotes[req._id] || ''}
+                        onChange={(e) => setReviewNotes((prev) => ({ ...prev, [req._id]: e.target.value }))}
+                        placeholder="Optional note…"
+                        className="flex-1 min-w-[160px] px-3 py-1.5 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      />
+                      <button
+                        onClick={() => handleReview(req._id, 'approved')}
+                        disabled={!!reviewing}
+                        className="flex items-center gap-1 px-3 py-1.5 text-sm bg-green-600 hover:bg-green-700 disabled:opacity-50 text-white rounded-lg font-medium"
+                      >
+                        {reviewing === req._id + 'approved'
+                          ? <span className="animate-spin rounded-full h-3 w-3 border-b-2 border-white" />
+                          : <Check className="h-3.5 w-3.5" />}
+                        Approve
+                      </button>
+                      <button
+                        onClick={() => handleReview(req._id, 'denied')}
+                        disabled={!!reviewing}
+                        className="flex items-center gap-1 px-3 py-1.5 text-sm bg-red-600 hover:bg-red-700 disabled:opacity-50 text-white rounded-lg font-medium"
+                      >
+                        {reviewing === req._id + 'denied'
+                          ? <span className="animate-spin rounded-full h-3 w-3 border-b-2 border-white" />
+                          : <X className="h-3.5 w-3.5" />}
+                        Deny
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ── Overview tab (original dashboard content) ─────────────────────────────────
 function OverviewTab({ user, todayShifts, weekShifts, employees, conversations }) {
   const myShifts = todayShifts.filter(
@@ -518,6 +869,7 @@ export default function Dashboard() {
   const [employees, setEmployees] = useState([]);
   const [conversations, setConversations] = useState([]);
   const [pendingCorrections, setPendingCorrections] = useState(0);
+  const [pendingTimeOff, setPendingTimeOff] = useState(0);
   const [loading, setLoading] = useState(true);
 
   const isAdmin = user?.role === 'admin' || user?.role === 'manager';
@@ -533,13 +885,15 @@ export default function Dashboard() {
       usersAPI.getAll(),
       messagesAPI.getConversations(),
       timeCorrectionAPI.getAll({ status: 'pending' }),
+      schedulesAPI.getTimeOff({ status: 'pending' }),
     ])
-      .then(([todayRes, weekRes, empRes, convRes, corrRes]) => {
+      .then(([todayRes, weekRes, empRes, convRes, corrRes, toRes]) => {
         setTodayShifts(todayRes.data);
         setWeekShifts(weekRes.data);
         setEmployees(empRes.data);
         setConversations(convRes.data.slice(0, 5));
         setPendingCorrections(corrRes.data.length);
+        setPendingTimeOff(toRes.data.length);
       })
       .finally(() => setLoading(false));
   }, []);
@@ -576,14 +930,15 @@ export default function Dashboard() {
             }`}
           >
             {label}
-            {/* Badge for pending corrections */}
+            {key === 'timeoff' && isAdmin && pendingTimeOff > 0 && (
+              <span className="ml-1.5 bg-yellow-400 text-white text-xs font-bold px-1.5 py-0.5 rounded-full">
+                {pendingTimeOff}
+              </span>
+            )}
             {key === 'timecorrection' && isAdmin && pendingCorrections > 0 && (
               <span className="ml-1.5 bg-yellow-400 text-white text-xs font-bold px-1.5 py-0.5 rounded-full">
                 {pendingCorrections}
               </span>
-            )}
-            {key === 'timecorrection' && !isAdmin && (
-              <span className="ml-1.5 text-xs text-gray-400">· my requests</span>
             )}
           </button>
         ))}
@@ -598,6 +953,9 @@ export default function Dashboard() {
           employees={employees}
           conversations={conversations}
         />
+      )}
+      {activeTab === 'timeoff' && (
+        <TimeOffTab user={user} />
       )}
       {activeTab === 'timecorrection' && (
         <TimeCorrectionTab user={user} />

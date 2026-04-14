@@ -113,15 +113,35 @@ router.post('/timeoff', auth, async (req, res) => {
   }
 });
 
-router.patch('/timeoff/:id', auth, isAdmin, async (req, res) => {
+router.patch('/timeoff/:id', auth, async (req, res) => {
   try {
+    const { role } = req.user;
+    if (role !== 'admin' && role !== 'manager') {
+      return res.status(403).json({ message: 'Only admin or manager can review time off requests.' });
+    }
     const { status, reviewNote } = req.body;
     const request = await TimeOffRequest.findByIdAndUpdate(
       req.params.id,
       { status, reviewNote, reviewedBy: req.user._id },
       { new: true }
-    ).populate('employee', 'name email color');
+    ).populate('employee', 'name email color').populate('reviewedBy', 'name');
+    if (!request) return res.status(404).json({ message: 'Request not found' });
     res.json(request);
+  } catch (err) {
+    res.status(500).json({ message: err.message });
+  }
+});
+
+router.delete('/timeoff/:id', auth, async (req, res) => {
+  try {
+    const request = await TimeOffRequest.findOne({
+      _id: req.params.id,
+      employee: req.user._id,
+      status: 'pending',
+    });
+    if (!request) return res.status(404).json({ message: 'Request not found or already reviewed' });
+    await request.deleteOne();
+    res.json({ message: 'Request deleted' });
   } catch (err) {
     res.status(500).json({ message: err.message });
   }

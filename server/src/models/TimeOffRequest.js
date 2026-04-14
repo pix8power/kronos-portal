@@ -7,7 +7,7 @@ const timeOffSchema = new mongoose.Schema(
     endDate: { type: String, required: true },
     type: {
       type: String,
-      enum: ['vacation', 'sick', 'personal', 'other'],
+      enum: ['vacation', 'educational', 'bereavement', 'sick', 'personal', 'other'],
       default: 'vacation',
     },
     reason: { type: String, default: '' },
