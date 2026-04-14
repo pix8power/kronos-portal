@@ -42,6 +42,7 @@ function TimeCorrectionTab({ user }) {
   const [showForm, setShowForm]   = useState(false);
   const [filterStatus, setFilter] = useState('');
   const [submitting, setSubmitting] = useState(false);
+  const [submitError, setSubmitError] = useState('');
   const [reason, setReason]       = useState('');
   const [entries, setEntries]     = useState([emptyEntry(), emptyEntry(), emptyEntry(), emptyEntry()]);
   const [reviewNotes, setReviewNotes] = useState({});
@@ -62,15 +63,25 @@ function TimeCorrectionTab({ user }) {
 
   const handleSubmit = async (e) => {
     e.preventDefault();
-    const filled = entries.filter((en) => en.clockIn || en.clockOut || en.date);
-    if (filled.length === 0) return alert('Please fill in at least one row.');
+    setSubmitError('');
+    const filled = entries.filter((en) => en.clockIn || en.clockOut || en.date || en.lunchOut || en.lunchIn);
+    if (filled.length === 0) {
+      setSubmitError('Please fill in at least one row before submitting.');
+      return;
+    }
+    if (!reason.trim()) {
+      setSubmitError('Please provide a reason for the correction.');
+      return;
+    }
     setSubmitting(true);
     try {
-      const res = await timeCorrectionAPI.submit({ entries: filled, reason });
+      const res = await timeCorrectionAPI.submit({ entries: filled, reason: reason.trim() });
       setRequests((prev) => [res.data, ...prev]);
       setShowForm(false);
       setEntries([emptyEntry(), emptyEntry(), emptyEntry(), emptyEntry()]);
       setReason('');
+    } catch (err) {
+      setSubmitError(err.response?.data?.message || err.message || 'Failed to submit request. Please try again.');
     } finally {
       setSubmitting(false);
     }
@@ -197,15 +208,21 @@ function TimeCorrectionTab({ user }) {
             <div>
               <label className="block text-xs font-medium text-gray-600 mb-1">Reason *</label>
               <textarea
-                required rows={2} value={reason}
-                onChange={(e) => setReason(e.target.value)}
+                rows={2} value={reason}
+                onChange={(e) => { setReason(e.target.value); setSubmitError(''); }}
                 placeholder="Explain why the time needs to be corrected..."
                 className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none"
               />
             </div>
 
+            {submitError && (
+              <div className="bg-red-50 border border-red-200 text-red-700 text-sm rounded-lg px-4 py-2">
+                {submitError}
+              </div>
+            )}
+
             <div className="flex gap-2">
-              <button type="button" onClick={() => setShowForm(false)}
+              <button type="button" onClick={() => { setShowForm(false); setSubmitError(''); }}
                 className="px-4 py-2 text-sm border border-gray-300 rounded-lg hover:bg-gray-50">
                 Cancel
               </button>
