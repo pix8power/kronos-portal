@@ -13,6 +13,15 @@ const TABS = [
   { key: 'timecorrection', label: 'Time Correction' },
 ];
 
+// Convert HH:MM (24h) to h:MM AM/PM
+const to12h = (t) => {
+  if (!t) return '—';
+  const [h, m] = t.split(':').map(Number);
+  const ampm = h < 12 ? 'AM' : 'PM';
+  const hour = h % 12 || 12;
+  return `${hour}:${m.toString().padStart(2, '0')} ${ampm}`;
+};
+
 const STATUS_BADGE = {
   pending:  'bg-yellow-100 text-yellow-700',
   approved: 'bg-green-100  text-green-700',
@@ -291,23 +300,32 @@ function TimeCorrectionTab({ user }) {
               {/* Times */}
               <div className="mt-3 grid grid-cols-2 gap-3">
                 <div className="bg-gray-50 rounded-lg p-3">
-                  <p className="text-xs font-medium text-gray-500 mb-1">Original Time</p>
-                  <p className="text-sm font-semibold text-gray-700">
-                    {req.originalClockIn || '—'} → {req.originalClockOut || '—'}
-                  </p>
+                  <p className="text-xs font-medium text-gray-500 mb-2">Original Time</p>
+                  <p className="text-xs text-gray-500">Clock In</p>
+                  <p className="text-sm font-semibold text-gray-700">{to12h(req.originalClockIn)}</p>
+                  <p className="text-xs text-gray-500 mt-1">Clock Out</p>
+                  <p className="text-sm font-semibold text-gray-700">{to12h(req.originalClockOut)}</p>
                 </div>
                 <div className="bg-blue-50 rounded-lg p-3">
-                  <p className="text-xs font-medium text-blue-600 mb-1">Corrected Time</p>
-                  <p className="text-sm font-semibold text-blue-700">
-                    {req.correctedClockIn} → {req.correctedClockOut}
-                  </p>
+                  <p className="text-xs font-medium text-blue-600 mb-2">Corrected Time</p>
+                  <p className="text-xs text-blue-500">Clock In</p>
+                  <p className="text-sm font-semibold text-blue-700">{to12h(req.correctedClockIn)}</p>
+                  <p className="text-xs text-blue-500 mt-1">Clock Out</p>
+                  <p className="text-sm font-semibold text-blue-700">{to12h(req.correctedClockOut)}</p>
                 </div>
                 {(req.lunchOut || req.lunchIn) && (
                   <div className="col-span-2 bg-orange-50 rounded-lg p-3">
-                    <p className="text-xs font-medium text-orange-600 mb-1">Lunch Break</p>
-                    <p className="text-sm font-semibold text-orange-700">
-                      Out: {req.lunchOut || '—'} &nbsp;·&nbsp; In: {req.lunchIn || '—'}
-                    </p>
+                    <p className="text-xs font-medium text-orange-600 mb-2">Lunch Break</p>
+                    <div className="flex gap-6">
+                      <div>
+                        <p className="text-xs text-orange-400">Lunch Out</p>
+                        <p className="text-sm font-semibold text-orange-700">{to12h(req.lunchOut)}</p>
+                      </div>
+                      <div>
+                        <p className="text-xs text-orange-400">Lunch In</p>
+                        <p className="text-sm font-semibold text-orange-700">{to12h(req.lunchIn)}</p>
+                      </div>
+                    </div>
                   </div>
                 )}
               </div>

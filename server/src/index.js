@@ -52,6 +52,9 @@ app.use('/api/timecorrections', timeCorrectionRoutes);
 
 app.get('/api/health', (req, res) => res.json({ status: 'ok' }));
 
+// Make io accessible in routes via req.app.get('io')
+app.set('io', io);
+
 // Socket.io
 initSocket(io);
 
