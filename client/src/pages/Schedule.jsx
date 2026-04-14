@@ -241,6 +241,27 @@ export default function Schedule() {
     ? employees.filter((e) => e._id === filterEmployee)
     : employees;
 
+  // Group displayed employees by position, sorted alphabetically
+  const positionGroups = [...displayedEmployees]
+    .sort((a, b) => a.name.localeCompare(b.name))
+    .reduce((acc, emp) => {
+      const pos = emp.position || 'Unassigned';
+      if (!acc[pos]) acc[pos] = [];
+      acc[pos].push(emp);
+      return acc;
+    }, {});
+  const sortedPositions = Object.keys(positionGroups).sort();
+
+  // Count employees in a position group who have ≥1 shift on a given day
+  const countWorking = (posEmps, day) => {
+    const dateStr = format(day, 'yyyy-MM-dd');
+    return posEmps.filter((emp) =>
+      filteredShifts.some(
+        (s) => (s.employee?._id || s.employee) === emp._id && s.date === dateStr
+      )
+    ).length;
+  };
+
   const totalHours = (emp) => {
     const empShifts = shifts.filter((s) => (s.employee?._id || s.employee) === emp._id);
     return empShifts.reduce((acc, s) => {
@@ -380,59 +401,99 @@ export default function Schedule() {
               {displayedEmployees.length === 0 ? (
                 <div className="text-center py-12 text-gray-400">No employees found</div>
               ) : (
-                displayedEmployees.map((emp) => (
-                  <div
-                    key={emp._id}
-                    className="grid border-b border-gray-100 last:border-b-0 hover:bg-gray-50/50 transition-colors"
-                    style={{ gridTemplateColumns: '180px repeat(7, 1fr)' }}
-                  >
-                    <div className="p-3 border-r border-gray-200 flex items-center gap-2">
+                sortedPositions.map((position) => {
+                  const posEmps = positionGroups[position];
+                  return (
+                    <div key={position}>
+                      {/* ── Position group header ── */}
                       <div
-                        className="w-8 h-8 rounded-full flex items-center justify-center text-white text-xs font-bold flex-shrink-0"
-                        style={{ backgroundColor: emp.color }}
+                        className="grid bg-gray-100 border-b border-gray-200"
+                        style={{ gridTemplateColumns: '180px repeat(7, 1fr)' }}
                       >
-                        {emp.name.split(' ').map((n) => n[0]).join('').slice(0, 2)}
-                      </div>
-                      <div className="min-w-0">
-                        <p className="text-sm font-medium text-gray-900 truncate">{emp.name}</p>
-                        <p className="text-xs text-gray-500 truncate">{emp.position || emp.role}</p>
-                        <p className="text-xs text-blue-600">{totalHours(emp).toFixed(1)}h/wk</p>
-                      </div>
-                    </div>
-                    {weekDays.map((day) => {
-                      const cellShifts = getShiftsForCell(emp._id, day);
-                      return (
-                        <div
-                          key={day.toString()}
-                          className={`p-1.5 border-r border-gray-100 last:border-r-0 min-h-[80px] ${
-                            isToday(day) ? 'bg-blue-50/50' : ''
-                          }`}
-                        >
-                          {cellShifts.map((shift) => (
+                        <div className="px-3 py-2 border-r border-gray-200 flex items-center gap-2">
+                          <span className="text-xs font-bold text-gray-700 uppercase tracking-wide truncate">
+                            {position}
+                          </span>
+                          <span className="ml-1 text-xs bg-blue-100 text-blue-700 font-semibold px-1.5 py-0.5 rounded-full flex-shrink-0">
+                            {posEmps.length}
+                          </span>
+                        </div>
+                        {weekDays.map((day) => {
+                          const working = countWorking(posEmps, day);
+                          return (
                             <div
-                              key={shift._id}
-                              onClick={() => isAdmin && openEditShift(shift)}
-                              className={`text-xs p-1.5 rounded-md border mb-1 cursor-pointer hover:opacity-80 transition-opacity ${
-                                STATUS_COLORS[shift.status] || STATUS_COLORS.scheduled
+                              key={day.toString()}
+                              className={`px-2 py-2 border-r border-gray-200 last:border-r-0 flex items-center justify-center ${
+                                isToday(day) ? 'bg-blue-50' : ''
                               }`}
                             >
-                              <p className="font-semibold">{shift.startTime}–{shift.endTime}</p>
-                              {shift.position && <p className="truncate opacity-80">{shift.position}</p>}
+                              {working > 0 ? (
+                                <span className="text-xs font-semibold text-green-700 bg-green-100 px-2 py-0.5 rounded-full">
+                                  {working} working
+                                </span>
+                              ) : (
+                                <span className="text-xs text-gray-400">—</span>
+                              )}
                             </div>
-                          ))}
-                          {isAdmin && (
-                            <button
-                              onClick={() => openAddShift(format(day, 'yyyy-MM-dd'))}
-                              className="w-full text-xs text-gray-300 hover:text-blue-500 hover:bg-blue-50 rounded-md py-1 transition-colors"
+                          );
+                        })}
+                      </div>
+
+                      {/* ── Employee rows within this position ── */}
+                      {posEmps.map((emp) => (
+                        <div
+                          key={emp._id}
+                          className="grid border-b border-gray-100 last:border-b-0 hover:bg-gray-50/50 transition-colors"
+                          style={{ gridTemplateColumns: '180px repeat(7, 1fr)' }}
+                        >
+                          <div className="p-3 border-r border-gray-200 flex items-center gap-2">
+                            <div
+                              className="w-8 h-8 rounded-full flex items-center justify-center text-white text-xs font-bold flex-shrink-0"
+                              style={{ backgroundColor: emp.color }}
                             >
-                              +
-                            </button>
-                          )}
+                              {emp.name.split(' ').map((n) => n[0]).join('').slice(0, 2)}
+                            </div>
+                            <div className="min-w-0">
+                              <p className="text-sm font-medium text-gray-900 truncate">{emp.name}</p>
+                              <p className="text-xs text-blue-600">{totalHours(emp).toFixed(1)}h/wk</p>
+                            </div>
+                          </div>
+                          {weekDays.map((day) => {
+                            const cellShifts = getShiftsForCell(emp._id, day);
+                            return (
+                              <div
+                                key={day.toString()}
+                                className={`p-1.5 border-r border-gray-100 last:border-r-0 min-h-[80px] ${
+                                  isToday(day) ? 'bg-blue-50/50' : ''
+                                }`}
+                              >
+                                {cellShifts.map((shift) => (
+                                  <div
+                                    key={shift._id}
+                                    onClick={() => isAdmin && openEditShift(shift)}
+                                    className={`text-xs p-1.5 rounded-md border mb-1 cursor-pointer hover:opacity-80 transition-opacity ${
+                                      STATUS_COLORS[shift.status] || STATUS_COLORS.scheduled
+                                    }`}
+                                  >
+                                    <p className="font-semibold">{shift.startTime}–{shift.endTime}</p>
+                                  </div>
+                                ))}
+                                {isAdmin && (
+                                  <button
+                                    onClick={() => openAddShift(format(day, 'yyyy-MM-dd'))}
+                                    className="w-full text-xs text-gray-300 hover:text-blue-500 hover:bg-blue-50 rounded-md py-1 transition-colors"
+                                  >
+                                    +
+                                  </button>
+                                )}
+                              </div>
+                            );
+                          })}
                         </div>
-                      );
-                    })}
-                  </div>
-                ))
+                      ))}
+                    </div>
+                  );
+                })
               )}
             </div>
           )}
