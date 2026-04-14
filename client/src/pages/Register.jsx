@@ -129,6 +129,7 @@ export default function Register() {
                 <option value="M.D.">M.D.</option>
                 <option value="Nurse Navigator">Nurse Navigator</option>
                 <option value="Case Manager">Case Manager</option>
+                <option value="Charge Nurse">Charge Nurse</option>
               </select>
             </div>
 
