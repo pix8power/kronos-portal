@@ -13,7 +13,7 @@ const ROLE_COLORS = {
 };
 
 export default function Employees() {
-  const { user } = useAuth();
+  const { user, updateUser } = useAuth();
   const { onlineUsers } = useSocket();
   const navigate = useNavigate();
   const isAdmin = user?.role === 'admin' || user?.role === 'manager';
@@ -21,6 +21,7 @@ export default function Employees() {
   const [employees, setEmployees] = useState([]);
   const [search, setSearch] = useState('');
   const [loading, setLoading] = useState(true);
+  const [roleError, setRoleError] = useState('');
 
   useEffect(() => {
     usersAPI.getAll()
@@ -38,11 +39,15 @@ export default function Employees() {
   };
 
   const handleRoleChange = async (empId, role) => {
+    setRoleError('');
     try {
       const res = await usersAPI.updateRole(empId, role);
       setEmployees((prev) => prev.map((e) => (e._id === empId ? res.data : e)));
+      // If the logged-in user changed their own role, update the AuthContext
+      if (empId === user?._id) updateUser({ role });
     } catch (err) {
-      console.error(err);
+      const msg = err.response?.data?.message || 'Failed to update role';
+      setRoleError(msg);
     }
   };
 
@@ -84,6 +89,12 @@ export default function Employees() {
           />
         </div>
       </div>
+
+      {roleError && (
+        <div className="mb-4 bg-red-50 border border-red-200 text-red-700 text-sm rounded-lg px-4 py-3">
+          Role update failed: {roleError}
+        </div>
+      )}
 
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
         {filtered.map((emp) => {

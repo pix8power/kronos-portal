@@ -134,11 +134,19 @@ router.post('/', auth, async (req, res) => {
 });
 
 // Review (approve / deny) — admin/manager only
-router.patch('/:id', auth, isAdmin, async (req, res) => {
+router.patch('/:id', auth, async (req, res) => {
   try {
+    const { role, name } = req.user;
+    if (role !== 'admin' && role !== 'manager') {
+      console.warn(`[TimeCorrectionReview] Denied: user "${name}" has role "${role}"`);
+      return res.status(403).json({
+        message: `Access denied — your account role is "${role}". Only admin or manager can review corrections.`,
+      });
+    }
+
     const { status, reviewNote } = req.body;
     if (!['approved', 'denied'].includes(status)) {
-      return res.status(400).json({ message: 'Invalid status' });
+      return res.status(400).json({ message: 'Invalid status. Must be "approved" or "denied".' });
     }
 
     const request = await TimeCorrection.findByIdAndUpdate(
@@ -150,6 +158,8 @@ router.patch('/:id', auth, isAdmin, async (req, res) => {
       .populate('reviewedBy', 'name');
 
     if (!request) return res.status(404).json({ message: 'Request not found' });
+
+    console.log(`[TimeCorrectionReview] ${name} (${role}) ${status} request ${req.params.id}`);
     res.json(request);
   } catch (err) {
     res.status(500).json({ message: err.message });
