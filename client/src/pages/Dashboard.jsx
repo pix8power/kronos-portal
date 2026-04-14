@@ -36,9 +36,11 @@ function TimeCorrectionTab({ user }) {
   const [loading, setLoading]       = useState(true);
   const [showForm, setShowForm]     = useState(false);
   const [filterStatus, setFilter]   = useState('');
-  const [reviewId, setReviewId]     = useState(null);
-  const [reviewNote, setReviewNote] = useState('');
   const [submitting, setSubmitting] = useState(false);
+  // Per-request review state
+  const [reviewNotes, setReviewNotes]   = useState({}); // { [reqId]: string }
+  const [reviewing, setReviewing]       = useState(null); // reqId currently being saved
+  const [reviewError, setReviewError]   = useState(null); // error message
   const [form, setForm] = useState({
     date: format(new Date(), 'yyyy-MM-dd'),
     originalClockIn: '',
@@ -80,13 +82,20 @@ function TimeCorrectionTab({ user }) {
   };
 
   const handleReview = async (id, status) => {
+    setReviewing(id + status);
+    setReviewError(null);
     try {
-      const res = await timeCorrectionAPI.review(id, { status, reviewNote });
+      const res = await timeCorrectionAPI.review(id, {
+        status,
+        reviewNote: reviewNotes[id] || '',
+      });
       setRequests((prev) => prev.map((r) => (r._id === id ? res.data : r)));
-      setReviewId(null);
-      setReviewNote('');
+      setReviewNotes((prev) => { const n = { ...prev }; delete n[id]; return n; });
     } catch (err) {
-      console.error(err);
+      const msg = err.response?.data?.message || err.message || 'Failed to update request';
+      setReviewError(msg);
+    } finally {
+      setReviewing(null);
     }
   };
 
@@ -344,43 +353,43 @@ function TimeCorrectionTab({ user }) {
 
               {/* Admin review actions */}
               {isAdmin && req.status === 'pending' && (
-                <div className="mt-3">
-                  {reviewId === req._id ? (
-                    <div className="flex flex-wrap items-center gap-2">
-                      <input
-                        type="text"
-                        value={reviewNote}
-                        onChange={(e) => setReviewNote(e.target.value)}
-                        placeholder="Optional note..."
-                        className="flex-1 min-w-[160px] px-3 py-1.5 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-                      />
-                      <button
-                        onClick={() => handleReview(req._id, 'approved')}
-                        className="flex items-center gap-1 px-3 py-1.5 text-sm bg-green-600 hover:bg-green-700 text-white rounded-lg font-medium"
-                      >
-                        <Check className="h-3.5 w-3.5" /> Approve
-                      </button>
-                      <button
-                        onClick={() => handleReview(req._id, 'denied')}
-                        className="flex items-center gap-1 px-3 py-1.5 text-sm bg-red-600 hover:bg-red-700 text-white rounded-lg font-medium"
-                      >
-                        <X className="h-3.5 w-3.5" /> Deny
-                      </button>
-                      <button
-                        onClick={() => { setReviewId(null); setReviewNote(''); }}
-                        className="px-3 py-1.5 text-sm border border-gray-300 rounded-lg hover:bg-gray-50"
-                      >
-                        Cancel
-                      </button>
-                    </div>
-                  ) : (
-                    <button
-                      onClick={() => setReviewId(req._id)}
-                      className="text-sm text-blue-600 hover:underline font-medium"
-                    >
-                      Review request →
-                    </button>
+                <div className="mt-3 space-y-2">
+                  {reviewError && reviewing === null && (
+                    <p className="text-xs text-red-600 bg-red-50 rounded-lg px-3 py-2">
+                      Error: {reviewError}
+                    </p>
                   )}
+                  <div className="flex flex-wrap items-center gap-2">
+                    <input
+                      type="text"
+                      value={reviewNotes[req._id] || ''}
+                      onChange={(e) =>
+                        setReviewNotes((prev) => ({ ...prev, [req._id]: e.target.value }))
+                      }
+                      placeholder="Optional note..."
+                      className="flex-1 min-w-[160px] px-3 py-1.5 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    />
+                    <button
+                      onClick={() => handleReview(req._id, 'approved')}
+                      disabled={!!reviewing}
+                      className="flex items-center gap-1 px-3 py-1.5 text-sm bg-green-600 hover:bg-green-700 disabled:opacity-50 text-white rounded-lg font-medium"
+                    >
+                      {reviewing === req._id + 'approved'
+                        ? <span className="animate-spin rounded-full h-3 w-3 border-b-2 border-white" />
+                        : <Check className="h-3.5 w-3.5" />}
+                      Approve
+                    </button>
+                    <button
+                      onClick={() => handleReview(req._id, 'denied')}
+                      disabled={!!reviewing}
+                      className="flex items-center gap-1 px-3 py-1.5 text-sm bg-red-600 hover:bg-red-700 disabled:opacity-50 text-white rounded-lg font-medium"
+                    >
+                      {reviewing === req._id + 'denied'
+                        ? <span className="animate-spin rounded-full h-3 w-3 border-b-2 border-white" />
+                        : <X className="h-3.5 w-3.5" />}
+                      Deny
+                    </button>
+                  </div>
                 </div>
               )}
             </div>
