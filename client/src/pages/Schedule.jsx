@@ -34,7 +34,7 @@ const VIEW_MODES = [
 const DAY_HEADERS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
 
 // ── Monthly calendar grid for one month ──────────────────────────────────────
-function MonthGrid({ month, shifts, employees, filterEmployee, isAdmin, onAddShift, onEditShift, compact }) {
+function MonthGrid({ month, shifts, employees, approvedTimeOff, filterEmployee, isAdmin, onAddShift, onEditShift, compact }) {
   const monthStart = startOfMonth(month);
   const monthEnd = endOfMonth(month);
   const calStart = startOfWeek(monthStart, { weekStartsOn: 1 });
@@ -46,6 +46,14 @@ function MonthGrid({ month, shifts, employees, filterEmployee, isAdmin, onAddShi
     return shifts.filter((s) => {
       const empMatch = !filterEmployee || (s.employee?._id || s.employee) === filterEmployee;
       return s.date === dateStr && empMatch;
+    });
+  };
+
+  const getTimeOffForDay = (day) => {
+    const dateStr = format(day, 'yyyy-MM-dd');
+    return (approvedTimeOff || []).filter((to) => {
+      const empMatch = !filterEmployee || (to.employee?._id || to.employee) === filterEmployee;
+      return empMatch && to.startDate <= dateStr && dateStr <= to.endDate;
     });
   };
 
@@ -72,7 +80,8 @@ function MonthGrid({ month, shifts, employees, filterEmployee, isAdmin, onAddShi
         {days.map((day) => {
           const inMonth = isSameMonth(day, month);
           const today = isToday(day);
-          const dayShifts = getShiftsForDay(day);
+          const dayShifts  = getShiftsForDay(day);
+          const dayTimeOff = getTimeOffForDay(day);
           const extra = dayShifts.length - maxVisible;
 
           return (
@@ -104,6 +113,17 @@ function MonthGrid({ month, shifts, employees, filterEmployee, isAdmin, onAddShi
                   </button>
                 )}
               </div>
+
+              {/* Time off pills */}
+              {dayTimeOff.map((to) => (
+                <div
+                  key={to._id}
+                  className="text-xs px-1.5 py-0.5 rounded mb-0.5 truncate border bg-amber-100 text-amber-800 border-amber-300"
+                  title={`${to.employee?.name} — Time Off`}
+                >
+                  🏖 {compact ? to.employee?.name?.split(' ')[0] : `${to.employee?.name?.split(' ')[0]} Off`}
+                </div>
+              ))}
 
               {/* Shift pills */}
               {dayShifts.slice(0, maxVisible).map((shift) => {
@@ -150,6 +170,7 @@ export default function Schedule() {
   const [viewMode, setViewMode] = useState('weekly');
   const [currentDate, setCurrentDate] = useState(new Date());
   const [shifts, setShifts] = useState([]);
+  const [approvedTimeOff, setApprovedTimeOff] = useState([]);
   const [employees, setEmployees] = useState([]);
   const [loading, setLoading] = useState(true);
   const [showModal, setShowModal] = useState(false);
@@ -207,16 +228,17 @@ export default function Schedule() {
   useEffect(() => {
     setLoading(true);
     const { start, end } = getRange();
+    const startStr = format(start, 'yyyy-MM-dd');
+    const endStr   = format(end,   'yyyy-MM-dd');
     Promise.all([
-      schedulesAPI.getShifts({
-        startDate: format(start, 'yyyy-MM-dd'),
-        endDate: format(end, 'yyyy-MM-dd'),
-      }),
+      schedulesAPI.getShifts({ startDate: startStr, endDate: endStr }),
       usersAPI.getAll(),
+      schedulesAPI.getTimeOff({ status: 'approved', startDate: startStr, endDate: endStr }),
     ])
-      .then(([shiftsRes, empRes]) => {
+      .then(([shiftsRes, empRes, toRes]) => {
         setShifts(shiftsRes.data);
         setEmployees(empRes.data);
+        setApprovedTimeOff(toRes.data);
       })
       .finally(() => setLoading(false));
   }, [currentDate, viewMode]);
@@ -251,6 +273,17 @@ export default function Schedule() {
       return acc;
     }, {});
   const sortedPositions = Object.keys(positionGroups).sort();
+
+  // Get approved time off record for an employee on a given day (if any)
+  const getTimeOff = (empId, day) => {
+    const dateStr = format(day, 'yyyy-MM-dd');
+    return approvedTimeOff.find(
+      (to) =>
+        (to.employee?._id || to.employee) === empId &&
+        to.startDate <= dateStr &&
+        dateStr <= to.endDate
+    );
+  };
 
   // Count employees in a position group who have ≥1 shift on a given day
   const countWorking = (posEmps, day) => {
@@ -460,14 +493,21 @@ export default function Schedule() {
                           </div>
                           {weekDays.map((day) => {
                             const cellShifts = getShiftsForCell(emp._id, day);
+                            const timeOff    = getTimeOff(emp._id, day);
                             return (
                               <div
                                 key={day.toString()}
                                 className={`p-1.5 border-r border-gray-100 last:border-r-0 min-h-[80px] ${
-                                  isToday(day) ? 'bg-blue-50/50' : ''
+                                  timeOff ? 'bg-amber-50/60' : isToday(day) ? 'bg-blue-50/50' : ''
                                 }`}
                               >
-                                {cellShifts.map((shift) => (
+                                {timeOff && (
+                                  <div className="text-xs p-1.5 rounded-md border border-amber-300 bg-amber-100 text-amber-800 mb-1">
+                                    <p className="font-semibold truncate">🏖 Time Off</p>
+                                    <p className="truncate opacity-80 capitalize">{timeOff.type === 'vacation' ? 'Vacation/PTO' : timeOff.type === 'educational' ? 'Educational' : timeOff.type === 'bereavement' ? 'Bereavement' : 'Other'}</p>
+                                  </div>
+                                )}
+                                {!timeOff && cellShifts.map((shift) => (
                                   <div
                                     key={shift._id}
                                     onClick={() => isAdmin && openEditShift(shift)}
@@ -478,7 +518,7 @@ export default function Schedule() {
                                     <p className="font-semibold">{shift.startTime}–{shift.endTime}</p>
                                   </div>
                                 ))}
-                                {isAdmin && (
+                                {!timeOff && isAdmin && (
                                   <button
                                     onClick={() => openAddShift(format(day, 'yyyy-MM-dd'))}
                                     className="w-full text-xs text-gray-300 hover:text-blue-500 hover:bg-blue-50 rounded-md py-1 transition-colors"
@@ -504,6 +544,7 @@ export default function Schedule() {
               month={currentDate}
               shifts={filteredShifts}
               employees={employees}
+              approvedTimeOff={approvedTimeOff}
               filterEmployee={filterEmployee}
               isAdmin={isAdmin}
               onAddShift={openAddShift}
@@ -519,6 +560,7 @@ export default function Schedule() {
                 month={currentDate}
                 shifts={filteredShifts}
                 employees={employees}
+                approvedTimeOff={approvedTimeOff}
                 filterEmployee={filterEmployee}
                 isAdmin={isAdmin}
                 onAddShift={openAddShift}
@@ -529,6 +571,7 @@ export default function Schedule() {
                 month={addMonths(currentDate, 1)}
                 shifts={filteredShifts}
                 employees={employees}
+                approvedTimeOff={approvedTimeOff}
                 filterEmployee={filterEmployee}
                 isAdmin={isAdmin}
                 onAddShift={openAddShift}
@@ -548,6 +591,10 @@ export default function Schedule() {
             <span className="text-xs text-gray-500 capitalize">{status}</span>
           </div>
         ))}
+        <div className="flex items-center gap-1.5">
+          <span className="w-3 h-3 rounded border bg-amber-100 border-amber-300" />
+          <span className="text-xs text-gray-500">Time Off</span>
+        </div>
       </div>
 
       {/* Modal */}

@@ -86,6 +86,13 @@ router.delete('/shifts/:id', auth, isAdmin, async (req, res) => {
 router.get('/timeoff', auth, async (req, res) => {
   try {
     const query = req.user.role === 'employee' ? { employee: req.user._id } : {};
+    const { status, startDate, endDate } = req.query;
+    if (status) query.status = status;
+    // Return requests that overlap with the given date range
+    if (startDate && endDate) {
+      query.startDate = { $lte: endDate };
+      query.endDate   = { $gte: startDate };
+    }
     const requests = await TimeOffRequest.find(query)
       .populate('employee', 'name email color')
       .populate('reviewedBy', 'name')
