@@ -123,13 +123,16 @@ export default function Register() {
                 className="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
               >
                 <option value="">Select position…</option>
-                <option value="R.N.">R.N.</option>
+                <option value="Case Manager">Case Manager</option>
+                <option value="Charge Nurse">Charge Nurse</option>
+                <option value="E.V.S.">E.V.S.</option>
                 <option value="L.V.N.">L.V.N.</option>
                 <option value="M.A.">M.A.</option>
                 <option value="M.D.">M.D.</option>
                 <option value="Nurse Navigator">Nurse Navigator</option>
-                <option value="Case Manager">Case Manager</option>
-                <option value="Charge Nurse">Charge Nurse</option>
+                <option value="Pharmacist">Pharmacist</option>
+                <option value="Pharmacy Tech">Pharmacy Tech</option>
+                <option value="R.N.">R.N.</option>
               </select>
             </div>
 
