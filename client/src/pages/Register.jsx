@@ -117,13 +117,19 @@ export default function Register() {
 
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">Position</label>
-              <input
-                type="text"
+              <select
                 value={form.position}
                 onChange={(e) => setForm({ ...form, position: e.target.value })}
                 className="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-                placeholder="e.g. Nurse, Cashier"
-              />
+              >
+                <option value="">Select position…</option>
+                <option value="R.N.">R.N.</option>
+                <option value="L.V.N.">L.V.N.</option>
+                <option value="M.A.">M.A.</option>
+                <option value="M.D.">M.D.</option>
+                <option value="Nurse Navigator">Nurse Navigator</option>
+                <option value="Case Manager">Case Manager</option>
+              </select>
             </div>
 
             <div>
