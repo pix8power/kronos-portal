@@ -57,16 +57,15 @@ router.post('/', auth, async (req, res) => {
       const entryLines = entries
         .filter((e) => e.date || e.clockIn || e.clockOut)
         .map((e) =>
-          `  ${e.date || '—'}  |  In: ${to12h(e.clockIn)}  |  Lunch Out: ${to12h(e.lunchOut)}  |  Lunch In: ${to12h(e.lunchIn)}  |  Out: ${to12h(e.clockOut)}`
+          `  ${e.date || '—'}  |  In: ${to12h(e.clockIn)}  |  Lunch Out: ${to12h(e.lunchOut)}  |  Lunch In: ${to12h(e.lunchIn)}  |  Out: ${to12h(e.clockOut)}${e.reason ? `  |  Reason: ${e.reason}` : ''}`
         )
         .join('\n');
 
       const msgContent =
         `📋 Time Correction Request from ${req.user.name}\n\n` +
-        `Date       | Clock In  | Lunch Out | Lunch In  | Clock Out\n` +
-        `─────────────────────────────────────────────────────\n` +
-        entryLines +
-        `\n\nReason: ${reason}`;
+        `Date       | Clock In  | Lunch Out | Lunch In  | Clock Out | Reason\n` +
+        `──────────────────────────────────────────────────────────────\n` +
+        entryLines;
 
       for (const manager of managers) {
         if (manager._id.toString() === req.user._id.toString()) continue;

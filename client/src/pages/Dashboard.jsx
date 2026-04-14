@@ -28,7 +28,7 @@ const STATUS_BADGE = {
   denied:   'bg-red-100    text-red-700',
 };
 
-const emptyEntry = () => ({ date: '', clockIn: '', lunchOut: '', lunchIn: '', clockOut: '' });
+const emptyEntry = () => ({ date: '', clockIn: '', lunchOut: '', lunchIn: '', clockOut: '', reason: '' });
 const INPUT_CLS = 'w-full px-2 py-1.5 text-xs border border-gray-300 rounded focus:outline-none focus:ring-1 focus:ring-blue-500 bg-white';
 const TH_CLS   = 'px-3 py-2 text-xs font-semibold text-gray-600 bg-gray-50 border-b border-gray-200 whitespace-nowrap';
 const TD_CLS   = 'px-2 py-1.5 border-b border-gray-100';
@@ -43,7 +43,6 @@ function TimeCorrectionTab({ user }) {
   const [filterStatus, setFilter] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState('');
-  const [reason, setReason]       = useState('');
   const [entries, setEntries]     = useState([emptyEntry(), emptyEntry(), emptyEntry(), emptyEntry()]);
   const [reviewNotes, setReviewNotes] = useState({});
   const [reviewing, setReviewing]     = useState(null);
@@ -69,17 +68,17 @@ function TimeCorrectionTab({ user }) {
       setSubmitError('Please fill in at least one row before submitting.');
       return;
     }
-    if (!reason.trim()) {
-      setSubmitError('Please provide a reason for the correction.');
+    const missingReason = filled.find((en) => !en.reason.trim());
+    if (missingReason) {
+      setSubmitError('Please provide a reason for every filled row.');
       return;
     }
     setSubmitting(true);
     try {
-      const res = await timeCorrectionAPI.submit({ entries: filled, reason: reason.trim() });
+      const res = await timeCorrectionAPI.submit({ entries: filled });
       setRequests((prev) => [res.data, ...prev]);
       setShowForm(false);
       setEntries([emptyEntry(), emptyEntry(), emptyEntry(), emptyEntry()]);
-      setReason('');
     } catch (err) {
       setSubmitError(err.response?.data?.message || err.message || 'Failed to submit request. Please try again.');
     } finally {
@@ -162,6 +161,7 @@ function TimeCorrectionTab({ user }) {
                     <th className={TH_CLS}>Time Out (Lunch)</th>
                     <th className={TH_CLS}>Time In (Lunch)</th>
                     <th className={TH_CLS}>Clock Out</th>
+                    <th className={TH_CLS}>Reason</th>
                     <th className={`${TH_CLS} w-8`}></th>
                   </tr>
                 </thead>
@@ -184,6 +184,10 @@ function TimeCorrectionTab({ user }) {
                         <input type="time" value={en.clockOut} onChange={(e) => updateEntry(i, 'clockOut', e.target.value)} className={INPUT_CLS} />
                       </td>
                       <td className={TD_CLS}>
+                        <input type="text" value={en.reason} onChange={(e) => updateEntry(i, 'reason', e.target.value)}
+                          placeholder="Required" className={INPUT_CLS} />
+                      </td>
+                      <td className={TD_CLS}>
                         {entries.length > 1 && (
                           <button type="button" onClick={() => setEntries((prev) => prev.filter((_, idx) => idx !== i))}
                             className="text-gray-300 hover:text-red-400 transition-colors">
@@ -204,16 +208,6 @@ function TimeCorrectionTab({ user }) {
             >
               <Plus className="h-3 w-3" /> Add row
             </button>
-
-            <div>
-              <label className="block text-xs font-medium text-gray-600 mb-1">Reason *</label>
-              <textarea
-                rows={2} value={reason}
-                onChange={(e) => { setReason(e.target.value); setSubmitError(''); }}
-                placeholder="Explain why the time needs to be corrected..."
-                className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none"
-              />
-            </div>
 
             {submitError && (
               <div className="bg-red-50 border border-red-200 text-red-700 text-sm rounded-lg px-4 py-2">
@@ -289,6 +283,7 @@ function TimeCorrectionTab({ user }) {
                       <th className={TH_CLS}>Time Out (Lunch)</th>
                       <th className={TH_CLS}>Time In (Lunch)</th>
                       <th className={TH_CLS}>Clock Out</th>
+                      <th className={TH_CLS}>Reason</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -301,23 +296,21 @@ function TimeCorrectionTab({ user }) {
                         <td className="px-3 py-2 text-xs text-gray-700 border-b border-gray-100">{to12h(en.lunchOut)}</td>
                         <td className="px-3 py-2 text-xs text-gray-700 border-b border-gray-100">{to12h(en.lunchIn)}</td>
                         <td className="px-3 py-2 text-xs text-gray-700 border-b border-gray-100">{to12h(en.clockOut)}</td>
+                        <td className="px-3 py-2 text-xs text-gray-500 border-b border-gray-100 italic">{en.reason || '—'}</td>
                       </tr>
                     ))}
                   </tbody>
                 </table>
               </div>
 
-              {/* Reason + review note */}
-              <div className="px-4 py-3 space-y-2">
-                <p className="text-xs text-gray-600">
-                  <span className="font-semibold text-gray-700">Reason: </span>{req.reason}
-                </p>
-                {req.reviewNote && (
+              {/* Review note */}
+              {req.reviewNote && (
+                <div className="px-4 py-3">
                   <p className="text-xs text-gray-400 italic">
                     Note from {req.reviewedBy?.name}: "{req.reviewNote}"
                   </p>
-                )}
-              </div>
+                </div>
+              )}
 
               {/* Admin review actions */}
               {isAdmin && req.status === 'pending' && (
