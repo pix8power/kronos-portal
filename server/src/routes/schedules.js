@@ -2,6 +2,7 @@ const router = require('express').Router();
 const Shift = require('../models/Shift');
 const TimeOffRequest = require('../models/TimeOffRequest');
 const Availability = require('../models/Availability');
+const ShiftExchange = require('../models/ShiftExchange');
 const { auth, isAdmin } = require('../middleware/auth');
 
 // Get shifts by date range
@@ -202,6 +203,147 @@ router.delete('/availability/:id', auth, async (req, res) => {
     if (!record) return res.status(404).json({ message: 'Not found' });
     await record.deleteOne();
     res.json({ message: 'Availability removed' });
+  } catch (err) {
+    res.status(500).json({ message: err.message });
+  }
+});
+
+// --- Shift Exchange ---
+
+const EXCHANGE_POPULATE = [
+  { path: 'shift' },
+  { path: 'requestedBy', select: 'name color position' },
+  { path: 'acceptedBy', select: 'name color' },
+  { path: 'responses.employee', select: 'name color position' },
+];
+
+// Get exchanges: admin/manager sees all; employee sees own + open ones they can cover
+router.get('/exchanges', auth, async (req, res) => {
+  try {
+    if (req.user.role === 'admin' || req.user.role === 'manager') {
+      const exchanges = await ShiftExchange.find()
+        .populate(EXCHANGE_POPULATE)
+        .sort({ date: 1, createdAt: -1 });
+      return res.json({ requests: exchanges, available: [] });
+    }
+
+    // Own requests
+    const requests = await ShiftExchange.find({ requestedBy: req.user._id })
+      .populate(EXCHANGE_POPULATE)
+      .sort({ createdAt: -1 });
+
+    // Open exchanges for same position, not own
+    const position = req.user.position;
+    const openQuery = { status: 'open', requestedBy: { $ne: req.user._id } };
+    if (position) openQuery.position = position;
+
+    let coverable = await ShiftExchange.find(openQuery)
+      .populate(EXCHANGE_POPULATE)
+      .sort({ date: 1 });
+
+    // Filter out dates where employee is already scheduled
+    if (coverable.length) {
+      const dates = [...new Set(coverable.map((e) => e.date))];
+      const myShifts = await Shift.find({ employee: req.user._id, date: { $in: dates } });
+      const busy = new Set(myShifts.map((s) => s.date));
+      coverable = coverable.filter((e) => !busy.has(e.date));
+    }
+
+    res.json({ requests, available: coverable });
+  } catch (err) {
+    res.status(500).json({ message: err.message });
+  }
+});
+
+// Create an exchange request for one of the employee's own shifts
+router.post('/exchanges', auth, async (req, res) => {
+  try {
+    const { shiftId, note } = req.body;
+    const shift = await Shift.findById(shiftId);
+    if (!shift) return res.status(404).json({ message: 'Shift not found' });
+    if (shift.employee.toString() !== req.user._id.toString()) {
+      return res.status(403).json({ message: 'You can only exchange your own shifts' });
+    }
+    const existing = await ShiftExchange.findOne({ shift: shiftId, status: 'open' });
+    if (existing) return res.status(409).json({ message: 'An open exchange request already exists for this shift' });
+
+    const exchange = await ShiftExchange.create({
+      shift: shiftId,
+      requestedBy: req.user._id,
+      date: shift.date,
+      position: shift.position || req.user.position || '',
+      note: note || '',
+    });
+    const populated = await ShiftExchange.findById(exchange._id).populate(EXCHANGE_POPULATE);
+    res.status(201).json(populated);
+  } catch (err) {
+    res.status(500).json({ message: err.message });
+  }
+});
+
+// Respond to an exchange (available / declined)
+router.post('/exchanges/:id/respond', auth, async (req, res) => {
+  try {
+    const { response } = req.body;
+    if (!['available', 'declined'].includes(response)) {
+      return res.status(400).json({ message: 'Invalid response' });
+    }
+    const exchange = await ShiftExchange.findById(req.params.id);
+    if (!exchange) return res.status(404).json({ message: 'Exchange not found' });
+    if (exchange.status !== 'open') return res.status(400).json({ message: 'Exchange is no longer open' });
+    if (exchange.requestedBy.toString() === req.user._id.toString()) {
+      return res.status(400).json({ message: 'Cannot respond to your own exchange request' });
+    }
+
+    const idx = exchange.responses.findIndex(
+      (r) => r.employee.toString() === req.user._id.toString()
+    );
+    if (idx >= 0) {
+      exchange.responses[idx].response = response;
+      exchange.responses[idx].respondedAt = new Date();
+    } else {
+      exchange.responses.push({ employee: req.user._id, response });
+    }
+    await exchange.save();
+    const populated = await ShiftExchange.findById(exchange._id).populate(EXCHANGE_POPULATE);
+    res.json(populated);
+  } catch (err) {
+    res.status(500).json({ message: err.message });
+  }
+});
+
+// Admin/manager: approve exchange and reassign the shift
+router.patch('/exchanges/:id', auth, isAdmin, async (req, res) => {
+  try {
+    const { acceptedBy } = req.body;
+    const exchange = await ShiftExchange.findById(req.params.id);
+    if (!exchange) return res.status(404).json({ message: 'Exchange not found' });
+    if (exchange.status !== 'open') return res.status(400).json({ message: 'Exchange is not open' });
+
+    await Shift.findByIdAndUpdate(exchange.shift, { employee: acceptedBy });
+    exchange.acceptedBy = acceptedBy;
+    exchange.status = 'approved';
+    await exchange.save();
+
+    const populated = await ShiftExchange.findById(exchange._id).populate(EXCHANGE_POPULATE);
+    res.json(populated);
+  } catch (err) {
+    res.status(500).json({ message: err.message });
+  }
+});
+
+// Cancel own open exchange request
+router.delete('/exchanges/:id', auth, async (req, res) => {
+  try {
+    const exchange = await ShiftExchange.findOne({
+      _id: req.params.id,
+      requestedBy: req.user._id,
+      status: 'open',
+    });
+    if (!exchange) return res.status(404).json({ message: 'Exchange not found or not cancellable' });
+    exchange.status = 'cancelled';
+    await exchange.save();
+    res.json({ message: 'Exchange cancelled' });
   } catch (err) {
     res.status(500).json({ message: err.message });
   }

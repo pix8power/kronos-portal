@@ -1,16 +1,17 @@
 import { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
-import { format, startOfWeek, endOfWeek } from 'date-fns';
+import { format, startOfWeek, endOfWeek, addWeeks } from 'date-fns';
 import {
   Calendar, MessageCircle, Users, Clock, TrendingUp, ChevronRight,
-  AlarmClockPlus, Plus, Check, X, Trash2, AlertCircle,
+  AlarmClockPlus, Plus, Check, X, Trash2, AlertCircle, ArrowLeftRight,
 } from 'lucide-react';
-import { schedulesAPI, usersAPI, messagesAPI, timeCorrectionAPI } from '../services/api';
+import { schedulesAPI, usersAPI, messagesAPI, timeCorrectionAPI, exchangeAPI } from '../services/api';
 import { differenceInCalendarDays, parseISO } from 'date-fns';
 import { useAuth } from '../contexts/AuthContext';
 
 const TABS = [
   { key: 'overview',       label: 'Overview' },
+  { key: 'shiftexchange',  label: 'Shift Exchange' },
   { key: 'timeoff',        label: 'Time Off' },
   { key: 'timecorrection', label: 'Time Correction' },
 ];
@@ -704,6 +705,404 @@ function TimeOffTab({ user }) {
   );
 }
 
+// ── Shift Exchange tab ────────────────────────────────────────────────────────
+function ShiftExchangeTab({ user }) {
+  const isAdmin = user?.role === 'admin' || user?.role === 'manager';
+
+  const [requests, setRequests]   = useState([]); // own (employee) or all (admin)
+  const [available, setAvailable] = useState([]); // cover opportunities for employee
+  const [myShifts, setMyShifts]   = useState([]); // own upcoming shifts for the form
+  const [loading, setLoading]     = useState(true);
+  const [showForm, setShowForm]   = useState(false);
+  const [form, setForm]           = useState({ shiftId: '', note: '' });
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError]         = useState('');
+  const [approving, setApproving] = useState(null);
+  const [responding, setResponding] = useState(null);
+
+  const load = async () => {
+    setLoading(true);
+    try {
+      const today   = format(new Date(), 'yyyy-MM-dd');
+      const inEight = format(addWeeks(new Date(), 8), 'yyyy-MM-dd');
+      const [exchRes, shiftsRes] = await Promise.all([
+        exchangeAPI.getAll(),
+        isAdmin
+          ? Promise.resolve({ data: [] })
+          : schedulesAPI.getShifts({ startDate: today, endDate: inEight, employeeId: user._id }),
+      ]);
+      setRequests(exchRes.data.requests);
+      setAvailable(exchRes.data.available);
+      // Exclude shifts already posted for exchange
+      const openShiftIds = new Set(
+        (exchRes.data.requests || []).filter((e) => e.status === 'open').map((e) => e.shift?._id)
+      );
+      setMyShifts((shiftsRes.data || []).filter((s) => !openShiftIds.has(s._id)));
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => { load(); }, []);
+
+  const handleCreate = async (e) => {
+    e.preventDefault();
+    setError('');
+    if (!form.shiftId) { setError('Please select a shift.'); return; }
+    setSubmitting(true);
+    try {
+      const res = await exchangeAPI.create(form);
+      setRequests((prev) => [res.data, ...prev]);
+      setMyShifts((prev) => prev.filter((s) => s._id !== form.shiftId));
+      setShowForm(false);
+      setForm({ shiftId: '', note: '' });
+    } catch (err) {
+      setError(err.response?.data?.message || 'Failed to post exchange request');
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const handleRespond = async (exchangeId, response) => {
+    setResponding(exchangeId + response);
+    try {
+      const res = await exchangeAPI.respond(exchangeId, { response });
+      setAvailable((prev) => prev.map((e) => (e._id === exchangeId ? res.data : e)));
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setResponding(null);
+    }
+  };
+
+  const handleApprove = async (exchangeId, acceptedById) => {
+    setApproving(exchangeId + acceptedById);
+    try {
+      const res = await exchangeAPI.approve(exchangeId, { acceptedBy: acceptedById });
+      setRequests((prev) => prev.map((e) => (e._id === exchangeId ? res.data : e)));
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setApproving(null);
+    }
+  };
+
+  const handleCancel = async (exchangeId) => {
+    if (!confirm('Cancel this exchange request?')) return;
+    try {
+      await exchangeAPI.cancel(exchangeId);
+      setRequests((prev) =>
+        prev.map((e) => (e._id === exchangeId ? { ...e, status: 'cancelled' } : e))
+      );
+    } catch (err) {
+      console.error(err);
+    }
+  };
+
+  const myResponse = (exchange) =>
+    exchange.responses?.find((r) => (r.employee?._id || r.employee) === user._id)?.response;
+
+  const availableResponders = (exchange) =>
+    exchange.responses?.filter((r) => r.response === 'available') || [];
+
+  const STATUS_CLS = {
+    open:      'bg-yellow-100 text-yellow-700',
+    approved:  'bg-green-100 text-green-700',
+    cancelled: 'bg-gray-100 text-gray-500',
+  };
+
+  if (loading) return (
+    <div className="flex justify-center py-12">
+      <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600" />
+    </div>
+  );
+
+  return (
+    <div className="space-y-6">
+      {/* Header */}
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div className="flex items-center gap-3">
+          <h2 className="text-lg font-bold text-gray-900 flex items-center gap-2">
+            <ArrowLeftRight className="h-5 w-5 text-blue-600" />
+            Shift Exchange
+          </h2>
+          {!isAdmin && available.length > 0 && (
+            <span className="bg-blue-100 text-blue-700 text-xs font-semibold px-2.5 py-1 rounded-full">
+              {available.length} open for your position
+            </span>
+          )}
+        </div>
+        {!isAdmin && (
+          <button
+            onClick={() => setShowForm((v) => !v)}
+            className="flex items-center gap-1.5 bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors"
+          >
+            <Plus className="h-4 w-4" />
+            Post My Shift
+          </button>
+        )}
+      </div>
+
+      {/* ── Create form ── */}
+      {showForm && !isAdmin && (
+        <div className="bg-white border border-blue-100 rounded-xl shadow-sm overflow-hidden">
+          <div className="bg-blue-600 px-5 py-3">
+            <h3 className="font-semibold text-white text-sm">Post a Shift for Exchange</h3>
+          </div>
+          <form onSubmit={handleCreate} className="p-4 space-y-3">
+            {error && (
+              <div className="bg-red-50 border border-red-200 text-red-700 text-sm rounded-lg px-4 py-2">{error}</div>
+            )}
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Select your shift *</label>
+              <select
+                required
+                value={form.shiftId}
+                onChange={(e) => setForm((f) => ({ ...f, shiftId: e.target.value }))}
+                className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+              >
+                <option value="">-- Select a shift --</option>
+                {myShifts.length === 0
+                  ? <option disabled>No upcoming shifts available</option>
+                  : myShifts.map((s) => (
+                    <option key={s._id} value={s._id}>
+                      {format(parseISO(s.date + 'T00:00:00'), 'EEE, MMM d')} · {to12h(s.startTime)}–{to12h(s.endTime)}{s.position ? ` (${s.position})` : ''}
+                    </option>
+                  ))
+                }
+              </select>
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Note (optional)</label>
+              <input
+                type="text"
+                value={form.note}
+                onChange={(e) => setForm((f) => ({ ...f, note: e.target.value }))}
+                placeholder="e.g. Doctor's appointment, please help!"
+                className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+              />
+            </div>
+            <div className="flex gap-2 pt-1">
+              <button
+                type="button"
+                onClick={() => { setShowForm(false); setError(''); }}
+                className="px-4 py-2 text-sm border border-gray-300 rounded-lg hover:bg-gray-50"
+              >
+                Cancel
+              </button>
+              <button
+                type="submit"
+                disabled={submitting}
+                className="px-4 py-2 text-sm bg-blue-600 hover:bg-blue-700 disabled:bg-blue-400 text-white rounded-lg font-medium"
+              >
+                {submitting ? 'Posting…' : 'Post for Exchange'}
+              </button>
+            </div>
+          </form>
+        </div>
+      )}
+
+      {/* ── Employee: shifts available to cover ── */}
+      {!isAdmin && (
+        <div>
+          <h3 className="text-sm font-semibold text-gray-700 mb-3">
+            Shifts Available to Cover
+          </h3>
+          {available.length === 0 ? (
+            <div className="text-center py-8 text-gray-400 bg-gray-50 rounded-xl border border-gray-100">
+              <ArrowLeftRight className="h-8 w-8 mx-auto mb-2 opacity-25" />
+              <p className="text-sm">No open shift requests for your position right now</p>
+            </div>
+          ) : (
+            <div className="space-y-3">
+              {available.map((exchange) => {
+                const resp = myResponse(exchange);
+                const shift = exchange.shift;
+                return (
+                  <div key={exchange._id} className="bg-white rounded-xl border border-gray-100 shadow-sm p-4">
+                    <div className="flex flex-wrap items-start justify-between gap-3">
+                      <div className="flex items-center gap-3">
+                        <div
+                          className="w-9 h-9 rounded-full flex items-center justify-center text-white text-xs font-bold flex-shrink-0"
+                          style={{ backgroundColor: exchange.requestedBy?.color || '#3B82F6' }}
+                        >
+                          {exchange.requestedBy?.name?.split(' ').map((n) => n[0]).join('').slice(0, 2)}
+                        </div>
+                        <div>
+                          <p className="font-semibold text-sm text-gray-900">{exchange.requestedBy?.name}</p>
+                          <p className="text-xs text-gray-500">{exchange.position}</p>
+                        </div>
+                      </div>
+                      <div className="text-right">
+                        <p className="text-sm font-semibold text-gray-900">
+                          {format(parseISO(exchange.date + 'T00:00:00'), 'EEE, MMM d, yyyy')}
+                        </p>
+                        {shift && (
+                          <p className="text-xs text-gray-500">{to12h(shift.startTime)} – {to12h(shift.endTime)}</p>
+                        )}
+                      </div>
+                    </div>
+                    {exchange.note && (
+                      <p className="text-xs text-gray-500 italic mt-2 bg-gray-50 px-3 py-1.5 rounded-lg">
+                        "{exchange.note}"
+                      </p>
+                    )}
+                    <div className="flex gap-2 mt-3">
+                      <button
+                        onClick={() => handleRespond(exchange._id, 'available')}
+                        disabled={!!responding}
+                        className={`flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg font-medium transition-colors ${
+                          resp === 'available'
+                            ? 'bg-green-600 text-white'
+                            : 'bg-green-50 text-green-700 hover:bg-green-100 border border-green-200'
+                        }`}
+                      >
+                        <Check className="h-3.5 w-3.5" />
+                        {resp === 'available' ? "I'm Available ✓" : "I'm Available"}
+                      </button>
+                      <button
+                        onClick={() => handleRespond(exchange._id, 'declined')}
+                        disabled={!!responding}
+                        className={`flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg font-medium transition-colors ${
+                          resp === 'declined'
+                            ? 'bg-gray-500 text-white'
+                            : 'bg-gray-50 text-gray-600 hover:bg-gray-100 border border-gray-200'
+                        }`}
+                      >
+                        <X className="h-3.5 w-3.5" />
+                        Not Available
+                      </button>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* ── My requests (employee) / All requests (admin) ── */}
+      <div>
+        <h3 className="text-sm font-semibold text-gray-700 mb-3">
+          {isAdmin ? 'All Exchange Requests' : 'My Exchange Requests'}
+          {requests.length > 0 && (
+            <span className="ml-2 bg-gray-100 text-gray-600 text-xs px-2 py-0.5 rounded-full">{requests.length}</span>
+          )}
+        </h3>
+        {requests.length === 0 ? (
+          <div className="text-center py-8 text-gray-400 bg-gray-50 rounded-xl border border-gray-100">
+            <p className="text-sm">{isAdmin ? 'No exchange requests yet' : 'You have no exchange requests'}</p>
+            {!isAdmin && <p className="text-xs mt-1">Post a shift above to ask colleagues to cover</p>}
+          </div>
+        ) : (
+          <div className="space-y-3">
+            {requests.map((exchange) => {
+              const shift = exchange.shift;
+              const responders = availableResponders(exchange);
+              return (
+                <div key={exchange._id} className="bg-white rounded-xl border border-gray-100 shadow-sm overflow-hidden">
+                  {/* Card header */}
+                  <div className="flex flex-wrap items-center justify-between gap-3 px-4 py-3 border-b border-gray-100">
+                    <div className="flex items-center gap-3">
+                      {isAdmin && (
+                        <div
+                          className="w-8 h-8 rounded-full flex items-center justify-center text-white text-xs font-bold flex-shrink-0"
+                          style={{ backgroundColor: exchange.requestedBy?.color || '#3B82F6' }}
+                        >
+                          {exchange.requestedBy?.name?.split(' ').map((n) => n[0]).join('').slice(0, 2)}
+                        </div>
+                      )}
+                      <div>
+                        {isAdmin && (
+                          <p className="font-semibold text-sm text-gray-900">{exchange.requestedBy?.name}</p>
+                        )}
+                        <p className="text-sm font-medium text-gray-700">
+                          {format(parseISO(exchange.date + 'T00:00:00'), 'EEE, MMM d, yyyy')}
+                          {shift && ` · ${to12h(shift.startTime)}–${to12h(shift.endTime)}`}
+                        </p>
+                        {exchange.position && (
+                          <p className="text-xs text-gray-400">{exchange.position}</p>
+                        )}
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <span className={`text-xs font-semibold px-2.5 py-1 rounded-full capitalize ${STATUS_CLS[exchange.status]}`}>
+                        {exchange.status}
+                      </span>
+                      {!isAdmin && exchange.status === 'open' && (
+                        <button
+                          onClick={() => handleCancel(exchange._id)}
+                          className="p-1.5 hover:bg-red-50 text-gray-400 hover:text-red-500 rounded-lg"
+                          title="Cancel request"
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </button>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Card body */}
+                  <div className="px-4 py-3">
+                    {exchange.note && (
+                      <p className="text-xs text-gray-500 italic mb-3">"{exchange.note}"</p>
+                    )}
+
+                    {exchange.status === 'approved' && exchange.acceptedBy && (
+                      <div className="flex items-center gap-2 text-sm text-gray-700">
+                        <Check className="h-4 w-4 text-green-600" />
+                        Covered by <strong className="ml-1">{exchange.acceptedBy.name}</strong>
+                      </div>
+                    )}
+
+                    {exchange.status === 'open' && (
+                      responders.length === 0 ? (
+                        <p className="text-xs text-gray-400">Waiting for colleagues to respond…</p>
+                      ) : (
+                        <div>
+                          <p className="text-xs font-medium text-gray-600 mb-2">
+                            {responders.length} colleague{responders.length > 1 ? 's' : ''} available:
+                          </p>
+                          <div className="flex flex-wrap gap-2">
+                            {responders.map((r) => (
+                              <div
+                                key={r.employee?._id}
+                                className="flex items-center gap-2 bg-green-50 border border-green-200 rounded-lg px-3 py-1.5"
+                              >
+                                <div
+                                  className="w-5 h-5 rounded-full flex items-center justify-center text-white text-xs font-bold flex-shrink-0"
+                                  style={{ backgroundColor: r.employee?.color || '#22c55e' }}
+                                >
+                                  {r.employee?.name?.split(' ').map((n) => n[0]).join('').slice(0, 2)}
+                                </div>
+                                <span className="text-xs font-medium text-gray-800">{r.employee?.name}</span>
+                                {isAdmin && (
+                                  <button
+                                    onClick={() => handleApprove(exchange._id, r.employee._id)}
+                                    disabled={!!approving}
+                                    className="ml-1 text-xs bg-green-600 hover:bg-green-700 disabled:opacity-50 text-white px-2 py-0.5 rounded font-medium"
+                                  >
+                                    {approving === exchange._id + r.employee._id ? '…' : 'Approve'}
+                                  </button>
+                                )}
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      )
+                    )}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 // ── Overview tab (original dashboard content) ─────────────────────────────────
 function OverviewTab({ user, todayShifts, weekShifts, employees, conversations }) {
   const myShifts = todayShifts.filter(
@@ -955,6 +1354,9 @@ export default function Dashboard() {
           employees={employees}
           conversations={conversations}
         />
+      )}
+      {activeTab === 'shiftexchange' && (
+        <ShiftExchangeTab user={user} />
       )}
       {activeTab === 'timeoff' && (
         <TimeOffTab user={user} />
