@@ -45,6 +45,9 @@ export const schedulesAPI = {
   requestTimeOff: (data) => api.post('/schedules/timeoff', data),
   reviewTimeOff: (id, data) => api.patch(`/schedules/timeoff/${id}`, data),
   deleteTimeOff: (id) => api.delete(`/schedules/timeoff/${id}`),
+  getAvailability: (params) => api.get('/schedules/availability', { params }),
+  addAvailability: (data) => api.post('/schedules/availability', data),
+  removeAvailability: (id) => api.delete(`/schedules/availability/${id}`),
 };
 
 export const messagesAPI = {

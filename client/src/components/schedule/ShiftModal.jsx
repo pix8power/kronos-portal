@@ -81,7 +81,7 @@ export default function ShiftModal({ shift, employees, defaultDate, onClose, onS
           )}
 
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Employee *</label>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Staff Member *</label>
             <select
               required
               value={form.employee}
@@ -96,7 +96,7 @@ export default function ShiftModal({ shift, employees, defaultDate, onClose, onS
               }}
               className="w-full px-3 py-2.5 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
             >
-              <option value="">Select employee</option>
+              <option value="">Select staff member</option>
               {employees.map((emp) => (
                 <option key={emp._id} value={emp._id}>
                   {emp.name} {emp.position ? `(${emp.position})` : ''}

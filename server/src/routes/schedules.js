@@ -1,6 +1,7 @@
 const router = require('express').Router();
 const Shift = require('../models/Shift');
 const TimeOffRequest = require('../models/TimeOffRequest');
+const Availability = require('../models/Availability');
 const { auth, isAdmin } = require('../middleware/auth');
 
 // Get shifts by date range
@@ -149,6 +150,58 @@ router.delete('/timeoff/:id', auth, async (req, res) => {
     if (!request) return res.status(404).json({ message: 'Request not found or already reviewed' });
     await request.deleteOne();
     res.json({ message: 'Request deleted' });
+  } catch (err) {
+    res.status(500).json({ message: err.message });
+  }
+});
+
+// --- Availability ---
+
+// Get availability (admin/manager sees all; employee sees own)
+router.get('/availability', auth, async (req, res) => {
+  try {
+    const { startDate, endDate } = req.query;
+    const query = {};
+    if (req.user.role === 'employee') query.employee = req.user._id;
+    if (startDate && endDate) query.date = { $gte: startDate, $lte: endDate };
+    const records = await Availability.find(query)
+      .populate('employee', 'name email color')
+      .sort({ date: 1 });
+    res.json(records);
+  } catch (err) {
+    res.status(500).json({ message: err.message });
+  }
+});
+
+// Mark self as available on a date
+router.post('/availability', auth, async (req, res) => {
+  try {
+    const { date, startTime, endTime, notes } = req.body;
+    const existing = await Availability.findOne({ employee: req.user._id, date });
+    if (existing) return res.status(409).json({ message: 'Already marked available for this date' });
+    const record = await Availability.create({
+      employee: req.user._id,
+      date,
+      startTime: startTime || '',
+      endTime: endTime || '',
+      notes: notes || '',
+    });
+    const populated = await record.populate('employee', 'name email color');
+    res.status(201).json(populated);
+  } catch (err) {
+    res.status(500).json({ message: err.message });
+  }
+});
+
+// Remove availability (own record only)
+router.delete('/availability/:id', auth, async (req, res) => {
+  try {
+    const query = { _id: req.params.id };
+    if (req.user.role === 'employee') query.employee = req.user._id;
+    const record = await Availability.findOne(query);
+    if (!record) return res.status(404).json({ message: 'Not found' });
+    await record.deleteOne();
+    res.json({ message: 'Availability removed' });
   } catch (err) {
     res.status(500).json({ message: err.message });
   }

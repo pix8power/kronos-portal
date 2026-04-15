@@ -4,7 +4,7 @@ import { useAuth } from '../contexts/AuthContext';
 import { useSocket } from '../contexts/SocketContext';
 import { useNavigate } from 'react-router-dom';
 import { messagesAPI } from '../services/api';
-import { Users, Search, MessageCircle, Mail, Phone, Shield } from 'lucide-react';
+import { Users, Search, MessageCircle, Mail, Phone, Shield, Trash2 } from 'lucide-react';
 
 const ROLE_COLORS = {
   admin: 'bg-red-100 text-red-700',
@@ -22,6 +22,7 @@ export default function Employees() {
   const [search, setSearch] = useState('');
   const [loading, setLoading] = useState(true);
   const [roleError, setRoleError] = useState('');
+  const [confirmDelete, setConfirmDelete] = useState(null);
 
   useEffect(() => {
     usersAPI.getAll()
@@ -35,6 +36,18 @@ export default function Employees() {
       navigate('/messages');
     } catch (err) {
       console.error(err);
+    }
+  };
+
+  const handleRemove = async (empId) => {
+    try {
+      await usersAPI.delete(empId);
+      setEmployees((prev) => prev.filter((e) => e._id !== empId));
+    } catch (err) {
+      const msg = err.response?.data?.message || 'Failed to remove staff member';
+      setRoleError(msg);
+    } finally {
+      setConfirmDelete(null);
     }
   };
 
@@ -73,7 +86,7 @@ export default function Employees() {
         <div>
           <h1 className="text-2xl font-bold text-gray-900 flex items-center gap-2">
             <Users className="h-6 w-6 text-blue-600" />
-            Employees
+            Staff
           </h1>
           <p className="text-gray-500 text-sm mt-0.5">
             {employees.length} total · {employees.filter((e) => onlineUsers.has(e._id) || e.isOnline).length} online
@@ -84,7 +97,7 @@ export default function Employees() {
           <input
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            placeholder="Search employees..."
+            placeholder="Search staff..."
             className="pl-9 pr-4 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 w-64"
           />
         </div>
@@ -175,6 +188,31 @@ export default function Employees() {
                       <MessageCircle className="h-3.5 w-3.5" />
                       Message
                     </button>
+                  )}
+                  {isAdmin && !isMe && (
+                    confirmDelete === emp._id ? (
+                      <div className="flex gap-1">
+                        <button
+                          onClick={() => handleRemove(emp._id)}
+                          className="text-xs px-2 py-1.5 bg-red-600 text-white hover:bg-red-700 rounded-lg font-medium transition-colors"
+                        >
+                          Confirm
+                        </button>
+                        <button
+                          onClick={() => setConfirmDelete(null)}
+                          className="text-xs px-2 py-1.5 bg-gray-100 text-gray-600 hover:bg-gray-200 rounded-lg font-medium transition-colors"
+                        >
+                          Cancel
+                        </button>
+                      </div>
+                    ) : (
+                      <button
+                        onClick={() => setConfirmDelete(emp._id)}
+                        className="flex items-center gap-1 text-xs px-2 py-1.5 bg-red-50 text-red-600 hover:bg-red-100 rounded-lg font-medium transition-colors"
+                      >
+                        <Trash2 className="h-3.5 w-3.5" />
+                      </button>
+                    )
                   )}
                 </div>
               </div>

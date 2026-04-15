@@ -16,7 +16,7 @@ const navItems = [
   { to: '/', label: 'Dashboard', icon: LayoutDashboard },
   { to: '/schedule', label: 'Schedule', icon: Calendar },
   { to: '/messages', label: 'Messages', icon: MessageCircle },
-  { to: '/employees', label: 'Employees', icon: Users },
+  { to: '/employees', label: 'Staff', icon: Users },
 ];
 
 export default function Navbar() {

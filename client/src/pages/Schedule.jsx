@@ -34,7 +34,7 @@ const VIEW_MODES = [
 const DAY_HEADERS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
 
 // ── Monthly calendar grid for one month ──────────────────────────────────────
-function MonthGrid({ month, shifts, employees, approvedTimeOff, filterEmployee, isAdmin, onAddShift, onEditShift, compact }) {
+function MonthGrid({ month, shifts, employees, approvedTimeOff, availability, filterEmployee, isAdmin, user, onAddShift, onEditShift, onToggleAvailability, compact }) {
   const monthStart = startOfMonth(month);
   const monthEnd = endOfMonth(month);
   const calStart = startOfWeek(monthStart, { weekStartsOn: 1 });
@@ -55,6 +55,21 @@ function MonthGrid({ month, shifts, employees, approvedTimeOff, filterEmployee, 
       const empMatch = !filterEmployee || (to.employee?._id || to.employee) === filterEmployee;
       return empMatch && to.startDate <= dateStr && dateStr <= to.endDate;
     });
+  };
+
+  const getAvailabilityForDay = (day) => {
+    const dateStr = format(day, 'yyyy-MM-dd');
+    return (availability || []).filter((a) => {
+      const empMatch = !filterEmployee || (a.employee?._id || a.employee) === filterEmployee;
+      return a.date === dateStr && empMatch;
+    });
+  };
+
+  const myAvailabilityForDay = (day) => {
+    const dateStr = format(day, 'yyyy-MM-dd');
+    return (availability || []).find(
+      (a) => a.date === dateStr && (a.employee?._id || a.employee) === user?._id
+    );
   };
 
   const maxVisible = compact ? 2 : 3;
@@ -80,8 +95,10 @@ function MonthGrid({ month, shifts, employees, approvedTimeOff, filterEmployee, 
         {days.map((day) => {
           const inMonth = isSameMonth(day, month);
           const today = isToday(day);
-          const dayShifts  = getShiftsForDay(day);
-          const dayTimeOff = getTimeOffForDay(day);
+          const dayShifts      = getShiftsForDay(day);
+          const dayTimeOff     = getTimeOffForDay(day);
+          const dayAvailability = getAvailabilityForDay(day);
+          const myAvail        = myAvailabilityForDay(day);
           const extra = dayShifts.length - maxVisible;
 
           return (
@@ -104,15 +121,43 @@ function MonthGrid({ month, shifts, employees, approvedTimeOff, filterEmployee, 
                 >
                   {format(day, 'd')}
                 </span>
-                {isAdmin && inMonth && (
-                  <button
-                    onClick={() => onAddShift(format(day, 'yyyy-MM-dd'))}
-                    className="opacity-0 group-hover:opacity-100 transition-opacity text-gray-300 hover:text-blue-500 text-sm leading-none pr-0.5"
-                  >
-                    +
-                  </button>
-                )}
+                <div className="flex gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
+                  {isAdmin && inMonth && (
+                    <button
+                      onClick={() => onAddShift(format(day, 'yyyy-MM-dd'))}
+                      className="text-gray-300 hover:text-blue-500 text-sm leading-none px-0.5"
+                      title="Add shift"
+                    >
+                      +
+                    </button>
+                  )}
+                  {!isAdmin && inMonth && !myAvail && (
+                    <button
+                      onClick={() => onToggleAvailability(format(day, 'yyyy-MM-dd'), null)}
+                      className="text-gray-300 hover:text-green-500 text-sm leading-none px-0.5"
+                      title="Mark available"
+                    >
+                      ✓
+                    </button>
+                  )}
+                </div>
               </div>
+
+              {/* Availability pills */}
+              {dayAvailability.map((a) => (
+                <div
+                  key={a._id}
+                  onClick={() => (a.employee?._id || a.employee) === user?._id
+                    ? onToggleAvailability(a.date, a._id)
+                    : undefined}
+                  className={`text-xs px-1.5 py-0.5 rounded mb-0.5 truncate border bg-green-100 text-green-800 border-green-300 ${
+                    (a.employee?._id || a.employee) === user?._id ? 'cursor-pointer hover:opacity-75' : ''
+                  }`}
+                  title={`${a.employee?.name} — Available${(a.employee?._id || a.employee) === user?._id ? ' (click to remove)' : ''}`}
+                >
+                  ✓ {compact ? a.employee?.name?.split(' ')[0] : `${a.employee?.name?.split(' ')[0]} Available`}
+                </div>
+              ))}
 
               {/* Time off pills */}
               {dayTimeOff.map((to) => (
@@ -171,6 +216,7 @@ export default function Schedule() {
   const [currentDate, setCurrentDate] = useState(new Date());
   const [shifts, setShifts] = useState([]);
   const [approvedTimeOff, setApprovedTimeOff] = useState([]);
+  const [availability, setAvailability] = useState([]);
   const [employees, setEmployees] = useState([]);
   const [loading, setLoading] = useState(true);
   const [showModal, setShowModal] = useState(false);
@@ -234,11 +280,13 @@ export default function Schedule() {
       schedulesAPI.getShifts({ startDate: startStr, endDate: endStr }),
       usersAPI.getAll(),
       schedulesAPI.getTimeOff({ status: 'approved', startDate: startStr, endDate: endStr }),
+      schedulesAPI.getAvailability({ startDate: startStr, endDate: endStr }),
     ])
-      .then(([shiftsRes, empRes, toRes]) => {
+      .then(([shiftsRes, empRes, toRes, availRes]) => {
         setShifts(shiftsRes.data);
         setEmployees(empRes.data);
         setApprovedTimeOff(toRes.data);
+        setAvailability(availRes.data);
       })
       .finally(() => setLoading(false));
   }, [currentDate, viewMode]);
@@ -304,6 +352,35 @@ export default function Schedule() {
     }, 0);
   };
 
+  // Get availability record for a specific employee on a day
+  const getAvailabilityForCell = (empId, day) => {
+    const dateStr = format(day, 'yyyy-MM-dd');
+    return availability.find(
+      (a) => (a.employee?._id || a.employee) === empId && a.date === dateStr
+    );
+  };
+
+  // Toggle availability for the current user (add or remove)
+  const handleToggleAvailability = async (date, existingId) => {
+    if (existingId) {
+      // Remove
+      try {
+        await schedulesAPI.removeAvailability(existingId);
+        setAvailability((prev) => prev.filter((a) => a._id !== existingId));
+      } catch (err) {
+        console.error(err);
+      }
+    } else {
+      // Add
+      try {
+        const res = await schedulesAPI.addAvailability({ date });
+        setAvailability((prev) => [...prev, res.data]);
+      } catch (err) {
+        if (err.response?.status !== 409) console.error(err);
+      }
+    }
+  };
+
   // ── Modal handlers ─────────────────────────────────────────────────────────
   const openAddShift = (date) => {
     setSelectedDate(date);
@@ -365,7 +442,7 @@ export default function Schedule() {
             onChange={(e) => setFilterEmployee(e.target.value)}
             className="px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
           >
-            <option value="">All Employees</option>
+            <option value="">All Staff</option>
             {employees.map((emp) => (
               <option key={emp._id} value={emp._id}>
                 {emp.name}
@@ -412,7 +489,7 @@ export default function Schedule() {
             <div className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
               <div className="grid border-b border-gray-200" style={{ gridTemplateColumns: '180px repeat(7, 1fr)' }}>
                 <div className="p-3 border-r border-gray-200 bg-gray-50">
-                  <p className="text-xs font-semibold text-gray-500 uppercase">Employee</p>
+                  <p className="text-xs font-semibold text-gray-500 uppercase">Staff</p>
                 </div>
                 {weekDays.map((day) => (
                   <div
@@ -432,7 +509,7 @@ export default function Schedule() {
               </div>
 
               {displayedEmployees.length === 0 ? (
-                <div className="text-center py-12 text-gray-400">No employees found</div>
+                <div className="text-center py-12 text-gray-400">No staff found</div>
               ) : (
                 sortedPositions.map((position) => {
                   const posEmps = positionGroups[position];
@@ -492,19 +569,30 @@ export default function Schedule() {
                             </div>
                           </div>
                           {weekDays.map((day) => {
-                            const cellShifts = getShiftsForCell(emp._id, day);
-                            const timeOff    = getTimeOff(emp._id, day);
+                            const cellShifts  = getShiftsForCell(emp._id, day);
+                            const timeOff     = getTimeOff(emp._id, day);
+                            const avail       = getAvailabilityForCell(emp._id, day);
+                            const isOwnRow    = emp._id === user?._id;
                             return (
                               <div
                                 key={day.toString()}
                                 className={`p-1.5 border-r border-gray-100 last:border-r-0 min-h-[80px] ${
-                                  timeOff ? 'bg-amber-50/60' : isToday(day) ? 'bg-blue-50/50' : ''
+                                  timeOff ? 'bg-amber-50/60' : avail ? 'bg-green-50/40' : isToday(day) ? 'bg-blue-50/50' : ''
                                 }`}
                               >
                                 {timeOff && (
                                   <div className="text-xs p-1.5 rounded-md border border-amber-300 bg-amber-100 text-amber-800 mb-1">
                                     <p className="font-semibold truncate">🏖 Time Off</p>
                                     <p className="truncate opacity-80 capitalize">{timeOff.type === 'vacation' ? 'Vacation/PTO' : timeOff.type === 'educational' ? 'Educational' : timeOff.type === 'bereavement' ? 'Bereavement' : 'Other'}</p>
+                                  </div>
+                                )}
+                                {avail && (
+                                  <div
+                                    onClick={isOwnRow ? () => handleToggleAvailability(avail.date, avail._id) : undefined}
+                                    className={`text-xs p-1.5 rounded-md border border-green-300 bg-green-100 text-green-800 mb-1 ${isOwnRow ? 'cursor-pointer hover:opacity-75' : ''}`}
+                                    title={isOwnRow ? 'Click to remove availability' : 'Available'}
+                                  >
+                                    <p className="font-semibold">✓ Available</p>
                                   </div>
                                 )}
                                 {!timeOff && cellShifts.map((shift) => (
@@ -518,6 +606,15 @@ export default function Schedule() {
                                     <p className="font-semibold">{shift.startTime}–{shift.endTime}</p>
                                   </div>
                                 ))}
+                                {!timeOff && !avail && isOwnRow && (
+                                  <button
+                                    onClick={() => handleToggleAvailability(format(day, 'yyyy-MM-dd'), null)}
+                                    className="w-full text-xs text-gray-300 hover:text-green-500 hover:bg-green-50 rounded-md py-1 transition-colors"
+                                    title="Mark available"
+                                  >
+                                    ✓
+                                  </button>
+                                )}
                                 {!timeOff && isAdmin && (
                                   <button
                                     onClick={() => openAddShift(format(day, 'yyyy-MM-dd'))}
@@ -545,10 +642,13 @@ export default function Schedule() {
               shifts={filteredShifts}
               employees={employees}
               approvedTimeOff={approvedTimeOff}
+              availability={availability}
               filterEmployee={filterEmployee}
               isAdmin={isAdmin}
+              user={user}
               onAddShift={openAddShift}
               onEditShift={openEditShift}
+              onToggleAvailability={handleToggleAvailability}
               compact={false}
             />
           )}
@@ -561,10 +661,13 @@ export default function Schedule() {
                 shifts={filteredShifts}
                 employees={employees}
                 approvedTimeOff={approvedTimeOff}
+                availability={availability}
                 filterEmployee={filterEmployee}
                 isAdmin={isAdmin}
+                user={user}
                 onAddShift={openAddShift}
                 onEditShift={openEditShift}
+                onToggleAvailability={handleToggleAvailability}
                 compact={true}
               />
               <MonthGrid
@@ -572,10 +675,13 @@ export default function Schedule() {
                 shifts={filteredShifts}
                 employees={employees}
                 approvedTimeOff={approvedTimeOff}
+                availability={availability}
                 filterEmployee={filterEmployee}
                 isAdmin={isAdmin}
+                user={user}
                 onAddShift={openAddShift}
                 onEditShift={openEditShift}
+                onToggleAvailability={handleToggleAvailability}
                 compact={true}
               />
             </div>
@@ -594,6 +700,10 @@ export default function Schedule() {
         <div className="flex items-center gap-1.5">
           <span className="w-3 h-3 rounded border bg-amber-100 border-amber-300" />
           <span className="text-xs text-gray-500">Time Off</span>
+        </div>
+        <div className="flex items-center gap-1.5">
+          <span className="w-3 h-3 rounded border bg-green-100 border-green-300" />
+          <span className="text-xs text-gray-500">Available</span>
         </div>
       </div>
 
