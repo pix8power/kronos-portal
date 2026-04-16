@@ -5,10 +5,14 @@ import {
   endOfWeek,
   startOfMonth,
   endOfMonth,
+  startOfYear,
+  endOfYear,
   addWeeks,
   subWeeks,
   addMonths,
   subMonths,
+  addYears,
+  subYears,
   eachDayOfInterval,
   isToday,
   isSameMonth,
@@ -25,20 +29,53 @@ const STATUS_COLORS = {
   cancelled: 'bg-red-100 text-red-700 border-red-200',
 };
 
+// ── Holiday helpers ───────────────────────────────────────────────────────────
+// Returns the nth (1-based) or last (-1) weekday of a given month
+function nthWeekday(year, month, weekday, n) {
+  if (n > 0) {
+    const first = new Date(year, month, 1);
+    const diff = (weekday - first.getDay() + 7) % 7;
+    return new Date(year, month, 1 + diff + (n - 1) * 7);
+  }
+  const last = new Date(year, month + 1, 0);
+  const diff = (last.getDay() - weekday + 7) % 7;
+  return new Date(year, month, last.getDate() - diff);
+}
+
+function getHolidays(year) {
+  const d = (date) => format(date, 'yyyy-MM-dd');
+  return [
+    { date: d(new Date(year, 0,  1)),                    name: "New Year's Day" },
+    { date: d(nthWeekday(year, 0, 1, 3)),                name: 'MLK Day' },
+    { date: d(nthWeekday(year, 1, 1, 3)),                name: "Presidents' Day" },
+    { date: d(nthWeekday(year, 4, 1, -1)),               name: 'Memorial Day' },
+    { date: d(new Date(year, 5, 19)),                    name: 'Juneteenth' },
+    { date: d(new Date(year, 6,  4)),                    name: 'Independence Day' },
+    { date: d(nthWeekday(year, 8, 1, 1)),                name: 'Labor Day' },
+    { date: d(nthWeekday(year, 9, 1, 2)),                name: 'Columbus Day' },
+    { date: d(new Date(year, 10, 11)),                   name: 'Veterans Day' },
+    { date: d(nthWeekday(year, 10, 4, 4)),               name: 'Thanksgiving' },
+    { date: d(new Date(year, 11, 24)),                   name: 'Christmas Eve' },
+    { date: d(new Date(year, 11, 25)),                   name: 'Christmas Day' },
+    { date: d(new Date(year, 11, 31)),                   name: "New Year's Eve" },
+  ];
+}
+
 const VIEW_MODES = [
-  { key: 'weekly', label: 'Weekly' },
+  { key: 'weekly',  label: 'Weekly' },
   { key: 'monthly', label: 'Monthly' },
   { key: '2months', label: '2 Months' },
+  { key: 'year',    label: 'Year' },
 ];
 
-const DAY_HEADERS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+const DAY_HEADERS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 
 // ── Monthly calendar grid for one month ──────────────────────────────────────
-function MonthGrid({ month, shifts, employees, approvedTimeOff, availability, filterEmployee, isAdmin, user, onAddShift, onEditShift, onToggleAvailability, compact }) {
+function MonthGrid({ month, shifts, employees, approvedTimeOff, availability, holidays, filterEmployee, isAdmin, user, onAddShift, onEditShift, onToggleAvailability, compact }) {
   const monthStart = startOfMonth(month);
   const monthEnd = endOfMonth(month);
-  const calStart = startOfWeek(monthStart, { weekStartsOn: 1 });
-  const calEnd = endOfWeek(monthEnd, { weekStartsOn: 1 });
+  const calStart = startOfWeek(monthStart, { weekStartsOn: 0 });
+  const calEnd = endOfWeek(monthEnd, { weekStartsOn: 0 });
   const days = eachDayOfInterval({ start: calStart, end: calEnd });
 
   const getShiftsForDay = (day) => {
@@ -72,6 +109,11 @@ function MonthGrid({ month, shifts, employees, approvedTimeOff, availability, fi
     );
   };
 
+  const getHolidayForDay = (day) => {
+    const dateStr = format(day, 'yyyy-MM-dd');
+    return (holidays || []).find((h) => h.date === dateStr) || null;
+  };
+
   const maxVisible = compact ? 2 : 3;
 
   return (
@@ -95,17 +137,18 @@ function MonthGrid({ month, shifts, employees, approvedTimeOff, availability, fi
         {days.map((day) => {
           const inMonth = isSameMonth(day, month);
           const today = isToday(day);
-          const dayShifts      = getShiftsForDay(day);
-          const dayTimeOff     = getTimeOffForDay(day);
+          const dayShifts       = getShiftsForDay(day);
+          const dayTimeOff      = getTimeOffForDay(day);
           const dayAvailability = getAvailabilityForDay(day);
-          const myAvail        = myAvailabilityForDay(day);
+          const myAvail         = myAvailabilityForDay(day);
+          const holiday         = inMonth ? getHolidayForDay(day) : null;
           const extra = dayShifts.length - maxVisible;
 
           return (
             <div
               key={day.toString()}
               className={`min-h-[${compact ? '72' : '90'}px] p-1 relative group ${
-                !inMonth ? 'bg-gray-50/60' : today ? 'bg-blue-50/40' : ''
+                !inMonth ? 'bg-gray-50/60' : holiday ? 'bg-purple-50/40' : today ? 'bg-blue-50/40' : ''
               }`}
             >
               {/* Day number */}
@@ -142,6 +185,13 @@ function MonthGrid({ month, shifts, employees, approvedTimeOff, availability, fi
                   )}
                 </div>
               </div>
+
+              {/* Holiday pill */}
+              {holiday && (
+                <div className="text-xs px-1.5 py-0.5 rounded mb-0.5 truncate border bg-purple-100 text-purple-800 border-purple-300 font-medium">
+                  ★ {compact ? holiday.name.split(' ')[0] : holiday.name}
+                </div>
+              )}
 
               {/* Availability pills */}
               {dayAvailability.map((a) => (
@@ -207,6 +257,96 @@ function MonthGrid({ month, shifts, employees, approvedTimeOff, availability, fi
   );
 }
 
+// ── Mini month for year view ──────────────────────────────────────────────────
+function MiniMonth({ month, shifts, approvedTimeOff, availability, holidays, filterEmployee, onMonthClick }) {
+  const monthStart = startOfMonth(month);
+  const monthEnd   = endOfMonth(month);
+  const calStart   = startOfWeek(monthStart, { weekStartsOn: 0 });
+  const calEnd     = endOfWeek(monthEnd,     { weekStartsOn: 0 });
+  const days       = eachDayOfInterval({ start: calStart, end: calEnd });
+
+  const getDayData = (day) => {
+    const d = format(day, 'yyyy-MM-dd');
+    const hasShifts = shifts.some((s) => {
+      const m = !filterEmployee || (s.employee?._id || s.employee) === filterEmployee;
+      return s.date === d && m;
+    });
+    const hasTimeOff = approvedTimeOff.some((to) => {
+      const m = !filterEmployee || (to.employee?._id || to.employee) === filterEmployee;
+      return m && to.startDate <= d && d <= to.endDate;
+    });
+    const hasAvailability = availability.some((a) => {
+      const m = !filterEmployee || (a.employee?._id || a.employee) === filterEmployee;
+      return a.date === d && m;
+    });
+    return { hasShifts, hasTimeOff, hasAvailability };
+  };
+
+  return (
+    <div
+      className="bg-white rounded-xl border border-gray-100 shadow-sm overflow-hidden cursor-pointer hover:shadow-md hover:border-blue-200 transition-all"
+      onClick={onMonthClick}
+    >
+      <div className="px-3 py-2 bg-gray-50 border-b border-gray-100">
+        <p className="font-semibold text-gray-800 text-sm">{format(month, 'MMMM')}</p>
+      </div>
+      <div className="grid grid-cols-7 px-1 pt-1.5">
+        {['S','M','T','W','T','F','S'].map((d, i) => (
+          <div key={i} className="text-center text-[10px] font-medium text-gray-400 pb-0.5">{d}</div>
+        ))}
+      </div>
+      <div className="grid grid-cols-7 px-1 pb-2">
+        {days.map((day) => {
+          const inMonth   = isSameMonth(day, month);
+          const today     = isToday(day);
+          const dateStr   = format(day, 'yyyy-MM-dd');
+          const isHoliday = inMonth && (holidays || []).some((h) => h.date === dateStr);
+          const { hasShifts, hasTimeOff, hasAvailability } = inMonth ? getDayData(day) : {};
+          return (
+            <div key={day.toString()} className="flex flex-col items-center py-0.5">
+              <span className={`text-[11px] w-5 h-5 flex items-center justify-center rounded-full leading-none ${
+                today      ? 'bg-blue-600 text-white font-bold' :
+                isHoliday  ? 'bg-purple-100 text-purple-700 font-semibold' :
+                inMonth    ? 'text-gray-700'                    : 'text-gray-300'
+              }`}>
+                {format(day, 'd')}
+              </span>
+              {inMonth && (hasShifts || hasTimeOff || hasAvailability || isHoliday) && (
+                <div className="flex gap-0.5 mt-0.5">
+                  {isHoliday       && <span className="w-1 h-1 rounded-full bg-purple-500" />}
+                  {hasShifts       && <span className="w-1 h-1 rounded-full bg-blue-500" />}
+                  {hasTimeOff      && <span className="w-1 h-1 rounded-full bg-amber-500" />}
+                  {hasAvailability && <span className="w-1 h-1 rounded-full bg-green-500" />}
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+function YearGrid({ year, shifts, approvedTimeOff, availability, holidays, filterEmployee, onMonthClick }) {
+  const months = Array.from({ length: 12 }, (_, i) => new Date(year, i, 1));
+  return (
+    <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3">
+      {months.map((month) => (
+        <MiniMonth
+          key={month.getMonth()}
+          month={month}
+          shifts={shifts}
+          approvedTimeOff={approvedTimeOff}
+          availability={availability}
+          holidays={holidays}
+          filterEmployee={filterEmployee}
+          onMonthClick={() => onMonthClick(month)}
+        />
+      ))}
+    </div>
+  );
+}
+
 // ── Main Schedule page ────────────────────────────────────────────────────────
 export default function Schedule() {
   const { user } = useAuth();
@@ -228,46 +368,55 @@ export default function Schedule() {
   const getRange = () => {
     if (viewMode === 'weekly') {
       return {
-        start: startOfWeek(currentDate, { weekStartsOn: 1 }),
-        end: endOfWeek(currentDate, { weekStartsOn: 1 }),
+        start: startOfWeek(currentDate, { weekStartsOn: 0 }),
+        end: endOfWeek(currentDate, { weekStartsOn: 0 }),
       };
     }
     if (viewMode === 'monthly') {
       const ms = startOfMonth(currentDate);
       const me = endOfMonth(currentDate);
       return {
-        start: startOfWeek(ms, { weekStartsOn: 1 }),
-        end: endOfWeek(me, { weekStartsOn: 1 }),
+        start: startOfWeek(ms, { weekStartsOn: 0 }),
+        end: endOfWeek(me, { weekStartsOn: 0 }),
+      };
+    }
+    if (viewMode === 'year') {
+      return {
+        start: startOfYear(currentDate),
+        end: endOfYear(currentDate),
       };
     }
     // 2months
     const ms = startOfMonth(currentDate);
     const me = endOfMonth(addMonths(currentDate, 1));
     return {
-      start: startOfWeek(ms, { weekStartsOn: 1 }),
-      end: endOfWeek(me, { weekStartsOn: 1 }),
+      start: startOfWeek(ms, { weekStartsOn: 0 }),
+      end: endOfWeek(me, { weekStartsOn: 0 }),
     };
   };
 
   const goBack = () => {
-    if (viewMode === 'weekly') setCurrentDate((d) => subWeeks(d, 1));
+    if (viewMode === 'weekly')  setCurrentDate((d) => subWeeks(d, 1));
     else if (viewMode === 'monthly') setCurrentDate((d) => subMonths(d, 1));
+    else if (viewMode === 'year')    setCurrentDate((d) => subYears(d, 1));
     else setCurrentDate((d) => subMonths(d, 2));
   };
 
   const goForward = () => {
-    if (viewMode === 'weekly') setCurrentDate((d) => addWeeks(d, 1));
+    if (viewMode === 'weekly')  setCurrentDate((d) => addWeeks(d, 1));
     else if (viewMode === 'monthly') setCurrentDate((d) => addMonths(d, 1));
+    else if (viewMode === 'year')    setCurrentDate((d) => addYears(d, 1));
     else setCurrentDate((d) => addMonths(d, 2));
   };
 
   const getTitle = () => {
     if (viewMode === 'weekly') {
-      const ws = startOfWeek(currentDate, { weekStartsOn: 1 });
-      const we = endOfWeek(currentDate, { weekStartsOn: 1 });
+      const ws = startOfWeek(currentDate, { weekStartsOn: 0 });
+      const we = endOfWeek(currentDate, { weekStartsOn: 0 });
       return `${format(ws, 'MMM d')} – ${format(we, 'MMM d, yyyy')}`;
     }
     if (viewMode === 'monthly') return format(currentDate, 'MMMM yyyy');
+    if (viewMode === 'year')    return format(currentDate, 'yyyy');
     return `${format(currentDate, 'MMMM')} – ${format(addMonths(currentDate, 1), 'MMMM yyyy')}`;
   };
 
@@ -291,9 +440,18 @@ export default function Schedule() {
       .finally(() => setLoading(false));
   }, [currentDate, viewMode]);
 
+  // ── Holidays (covers current + adjacent year for cross-year views) ────────
+  const currentYear = currentDate.getFullYear();
+  const holidays = [
+    ...getHolidays(currentYear - 1),
+    ...getHolidays(currentYear),
+    ...getHolidays(currentYear + 1),
+  ];
+  const holidayMap = Object.fromEntries(holidays.map((h) => [h.date, h.name]));
+
   // ── Weekly view helpers ────────────────────────────────────────────────────
-  const weekStart = startOfWeek(currentDate, { weekStartsOn: 1 });
-  const weekEnd = endOfWeek(currentDate, { weekStartsOn: 1 });
+  const weekStart = startOfWeek(currentDate, { weekStartsOn: 0 });
+  const weekEnd = endOfWeek(currentDate, { weekStartsOn: 0 });
   const weekDays = eachDayOfInterval({ start: weekStart, end: weekEnd });
 
   const filteredShifts = filterEmployee
@@ -379,6 +537,12 @@ export default function Schedule() {
         if (err.response?.status !== 409) console.error(err);
       }
     }
+  };
+
+  // Navigate from year view → monthly view for a clicked month
+  const handleYearMonthClick = (month) => {
+    setCurrentDate(month);
+    setViewMode('monthly');
   };
 
   // ── Modal handlers ─────────────────────────────────────────────────────────
@@ -491,21 +655,29 @@ export default function Schedule() {
                 <div className="p-3 border-r border-gray-200 bg-gray-50">
                   <p className="text-xs font-semibold text-gray-500 uppercase">Staff</p>
                 </div>
-                {weekDays.map((day) => (
-                  <div
-                    key={day.toString()}
-                    className={`p-3 text-center border-r border-gray-100 last:border-r-0 ${
-                      isToday(day) ? 'bg-blue-50' : 'bg-gray-50'
-                    }`}
-                  >
-                    <p className={`text-xs font-semibold uppercase ${isToday(day) ? 'text-blue-600' : 'text-gray-500'}`}>
-                      {format(day, 'EEE')}
-                    </p>
-                    <p className={`text-lg font-bold mt-0.5 ${isToday(day) ? 'text-blue-600' : 'text-gray-900'}`}>
-                      {format(day, 'd')}
-                    </p>
-                  </div>
-                ))}
+                {weekDays.map((day) => {
+                  const dayHoliday = holidayMap[format(day, 'yyyy-MM-dd')];
+                  return (
+                    <div
+                      key={day.toString()}
+                      className={`p-3 text-center border-r border-gray-100 last:border-r-0 ${
+                        isToday(day) ? 'bg-blue-50' : dayHoliday ? 'bg-purple-50' : 'bg-gray-50'
+                      }`}
+                    >
+                      <p className={`text-xs font-semibold uppercase ${isToday(day) ? 'text-blue-600' : 'text-gray-500'}`}>
+                        {format(day, 'EEE')}
+                      </p>
+                      <p className={`text-lg font-bold mt-0.5 ${isToday(day) ? 'text-blue-600' : 'text-gray-900'}`}>
+                        {format(day, 'd')}
+                      </p>
+                      {dayHoliday && (
+                        <p className="text-[10px] text-purple-600 font-medium mt-0.5 leading-tight truncate" title={dayHoliday}>
+                          ★ {dayHoliday}
+                        </p>
+                      )}
+                    </div>
+                  );
+                })}
               </div>
 
               {displayedEmployees.length === 0 ? (
@@ -643,6 +815,7 @@ export default function Schedule() {
               employees={employees}
               approvedTimeOff={approvedTimeOff}
               availability={availability}
+              holidays={holidays}
               filterEmployee={filterEmployee}
               isAdmin={isAdmin}
               user={user}
@@ -662,6 +835,7 @@ export default function Schedule() {
                 employees={employees}
                 approvedTimeOff={approvedTimeOff}
                 availability={availability}
+                holidays={holidays}
                 filterEmployee={filterEmployee}
                 isAdmin={isAdmin}
                 user={user}
@@ -676,6 +850,7 @@ export default function Schedule() {
                 employees={employees}
                 approvedTimeOff={approvedTimeOff}
                 availability={availability}
+                holidays={holidays}
                 filterEmployee={filterEmployee}
                 isAdmin={isAdmin}
                 user={user}
@@ -686,26 +861,66 @@ export default function Schedule() {
               />
             </div>
           )}
+
+          {/* ── Year view ── */}
+          {viewMode === 'year' && (
+            <YearGrid
+              year={currentDate.getFullYear()}
+              shifts={filteredShifts}
+              approvedTimeOff={approvedTimeOff}
+              availability={availability}
+              holidays={holidays}
+              filterEmployee={filterEmployee}
+              onMonthClick={handleYearMonthClick}
+            />
+          )}
         </>
       )}
 
       {/* Legend */}
-      <div className="flex gap-4 mt-3 flex-wrap">
-        {Object.entries(STATUS_COLORS).map(([status, cls]) => (
-          <div key={status} className="flex items-center gap-1.5">
-            <span className={`w-3 h-3 rounded border ${cls}`} />
-            <span className="text-xs text-gray-500 capitalize">{status}</span>
+      {viewMode === 'year' ? (
+        <div className="flex gap-4 mt-3 flex-wrap items-center">
+          <span className="text-xs text-gray-400">Dots:</span>
+          <div className="flex items-center gap-1.5">
+            <span className="w-2.5 h-2.5 rounded-full bg-purple-500" />
+            <span className="text-xs text-gray-500">Holiday</span>
           </div>
-        ))}
-        <div className="flex items-center gap-1.5">
-          <span className="w-3 h-3 rounded border bg-amber-100 border-amber-300" />
-          <span className="text-xs text-gray-500">Time Off</span>
+          <div className="flex items-center gap-1.5">
+            <span className="w-2.5 h-2.5 rounded-full bg-blue-500" />
+            <span className="text-xs text-gray-500">Shifts</span>
+          </div>
+          <div className="flex items-center gap-1.5">
+            <span className="w-2.5 h-2.5 rounded-full bg-amber-500" />
+            <span className="text-xs text-gray-500">Time Off</span>
+          </div>
+          <div className="flex items-center gap-1.5">
+            <span className="w-2.5 h-2.5 rounded-full bg-green-500" />
+            <span className="text-xs text-gray-500">Available</span>
+          </div>
+          <span className="text-xs text-gray-400 ml-2">Click a month to see details</span>
         </div>
-        <div className="flex items-center gap-1.5">
-          <span className="w-3 h-3 rounded border bg-green-100 border-green-300" />
-          <span className="text-xs text-gray-500">Available</span>
+      ) : (
+        <div className="flex gap-4 mt-3 flex-wrap">
+          {Object.entries(STATUS_COLORS).map(([status, cls]) => (
+            <div key={status} className="flex items-center gap-1.5">
+              <span className={`w-3 h-3 rounded border ${cls}`} />
+              <span className="text-xs text-gray-500 capitalize">{status}</span>
+            </div>
+          ))}
+          <div className="flex items-center gap-1.5">
+            <span className="w-3 h-3 rounded border bg-amber-100 border-amber-300" />
+            <span className="text-xs text-gray-500">Time Off</span>
+          </div>
+          <div className="flex items-center gap-1.5">
+            <span className="w-3 h-3 rounded border bg-green-100 border-green-300" />
+            <span className="text-xs text-gray-500">Available</span>
+          </div>
+          <div className="flex items-center gap-1.5">
+            <span className="w-3 h-3 rounded border bg-purple-100 border-purple-300" />
+            <span className="text-xs text-gray-500">Holiday</span>
+          </div>
         </div>
-      </div>
+      )}
 
       {/* Modal */}
       {showModal && (

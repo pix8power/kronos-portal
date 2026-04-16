@@ -2,6 +2,7 @@ const jwt = require('jsonwebtoken');
 const User = require('../models/User');
 const Message = require('../models/Message');
 const Conversation = require('../models/Conversation');
+const { encrypt, decrypt } = require('../utils/crypto');
 
 const onlineUsers = new Map(); // userId -> socketId
 
@@ -58,7 +59,7 @@ const initSocket = (io) => {
         const message = await Message.create({
           conversation: conversationId,
           sender: userId,
-          content,
+          content: encrypt(content),
           type: type || 'text',
           readBy: [userId],
         });
@@ -69,9 +70,12 @@ const initSocket = (io) => {
 
         const populated = await message.populate('sender', 'name email avatar color');
 
+        // Decrypt before sending to clients
+        const decrypted = { ...populated.toObject(), content: decrypt(populated.content) };
+
         io.to(`conv:${conversationId}`).emit('newMessage', {
           conversationId,
-          message: populated,
+          message: decrypted,
         });
 
         // Notify participants not in the room
@@ -80,7 +84,7 @@ const initSocket = (io) => {
           if (pid !== userId) {
             io.to(pid).emit('messageNotification', {
               conversationId,
-              message: populated,
+              message: decrypted,
             });
           }
         });

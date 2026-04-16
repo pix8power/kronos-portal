@@ -1277,8 +1277,8 @@ export default function Dashboard() {
 
   useEffect(() => {
     const today = format(new Date(), 'yyyy-MM-dd');
-    const weekStart = format(startOfWeek(new Date(), { weekStartsOn: 1 }), 'yyyy-MM-dd');
-    const weekEnd = format(endOfWeek(new Date(), { weekStartsOn: 1 }), 'yyyy-MM-dd');
+    const weekStart = format(startOfWeek(new Date(), { weekStartsOn: 0 }), 'yyyy-MM-dd');
+    const weekEnd = format(endOfWeek(new Date(), { weekStartsOn: 0 }), 'yyyy-MM-dd');
 
     Promise.all([
       schedulesAPI.getShifts({ startDate: today, endDate: today }),

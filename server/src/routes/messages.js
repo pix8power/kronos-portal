@@ -2,6 +2,23 @@ const router = require('express').Router();
 const Conversation = require('../models/Conversation');
 const Message = require('../models/Message');
 const { auth } = require('../middleware/auth');
+const { encrypt, decrypt } = require('../utils/crypto');
+
+// Decrypt content on a plain message object
+function decryptMessage(msg) {
+  const obj = msg.toObject ? msg.toObject() : { ...msg };
+  obj.content = decrypt(obj.content);
+  return obj;
+}
+
+// Decrypt the lastMessage.content on a plain conversation object
+function decryptConversation(conv) {
+  const obj = conv.toObject ? conv.toObject() : { ...conv };
+  if (obj.lastMessage && obj.lastMessage.content) {
+    obj.lastMessage = { ...obj.lastMessage, content: decrypt(obj.lastMessage.content) };
+  }
+  return obj;
+}
 
 // Get all conversations for the current user
 router.get('/conversations', auth, async (req, res) => {
@@ -10,7 +27,7 @@ router.get('/conversations', auth, async (req, res) => {
       .populate('participants', 'name email avatar color isOnline lastSeen')
       .populate({ path: 'lastMessage', populate: { path: 'sender', select: 'name' } })
       .sort({ updatedAt: -1 });
-    res.json(conversations);
+    res.json(conversations.map(decryptConversation));
   } catch (err) {
     res.status(500).json({ message: err.message });
   }
@@ -82,7 +99,7 @@ router.get('/conversations/:id/messages', auth, async (req, res) => {
       { $addToSet: { readBy: req.user._id } }
     );
 
-    res.json(messages.reverse());
+    res.json(messages.reverse().map(decryptMessage));
   } catch (err) {
     res.status(500).json({ message: err.message });
   }
@@ -95,7 +112,7 @@ router.post('/conversations/:id/messages', auth, async (req, res) => {
     const message = await Message.create({
       conversation: req.params.id,
       sender: req.user._id,
-      content,
+      content: encrypt(content),
       type: type || 'text',
       readBy: [req.user._id],
     });
@@ -103,7 +120,7 @@ router.post('/conversations/:id/messages', auth, async (req, res) => {
     await Conversation.findByIdAndUpdate(req.params.id, { lastMessage: message._id });
 
     const populated = await message.populate('sender', 'name email avatar color');
-    res.status(201).json(populated);
+    res.status(201).json(decryptMessage(populated));
   } catch (err) {
     res.status(500).json({ message: err.message });
   }
