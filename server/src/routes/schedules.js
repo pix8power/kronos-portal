@@ -241,7 +241,7 @@ router.post('/timeoff', auth, async (req, res) => {
 router.patch('/timeoff/:id', auth, async (req, res) => {
   try {
     const { role } = req.user;
-    if (role !== 'admin' && role !== 'manager') return res.status(403).json({ message: 'Access denied' });
+    if (!['admin', 'manager', 'charge_nurse'].includes(role)) return res.status(403).json({ message: 'Access denied' });
     const { status, reviewNote } = req.body;
     const request = await TimeOffRequest.findByIdAndUpdate(req.params.id, { status, reviewNote, reviewedBy: req.user._id }, { new: true })
       .populate('employee', 'name email color').populate('reviewedBy', 'name');
