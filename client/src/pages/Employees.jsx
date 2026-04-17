@@ -9,6 +9,7 @@ import { Users, Search, MessageCircle, Mail, Phone, Shield, Trash2 } from 'lucid
 const ROLE_COLORS = {
   admin: 'bg-red-100 text-red-700',
   manager: 'bg-orange-100 text-orange-700',
+  charge_nurse: 'bg-purple-100 text-purple-700',
   employee: 'bg-gray-100 text-gray-600',
 };
 
@@ -23,6 +24,7 @@ export default function Employees() {
   const [loading, setLoading] = useState(true);
   const [roleError, setRoleError] = useState('');
   const [confirmDelete, setConfirmDelete] = useState(null);
+  const canSeePhone = ['admin', 'manager', 'charge_nurse'].includes(user?.role);
 
   useEffect(() => {
     usersAPI.getAll()
@@ -122,12 +124,20 @@ export default function Employees() {
             >
               <div className="flex items-start gap-3">
                 <div className="relative">
-                  <div
-                    className="w-12 h-12 rounded-full flex items-center justify-center text-white text-sm font-bold"
-                    style={{ backgroundColor: emp.color }}
-                  >
-                    {initials}
-                  </div>
+                  {emp.avatar ? (
+                    <img
+                      src={emp.avatar}
+                      alt={emp.name}
+                      className="w-12 h-12 rounded-full object-cover border border-gray-200"
+                    />
+                  ) : (
+                    <div
+                      className="w-12 h-12 rounded-full flex items-center justify-center text-white text-sm font-bold"
+                      style={{ backgroundColor: emp.color }}
+                    >
+                      {initials}
+                    </div>
+                  )}
                   {isOnline && (
                     <span className="absolute bottom-0 right-0 w-3 h-3 bg-green-500 rounded-full border-2 border-white" />
                   )}
@@ -155,7 +165,7 @@ export default function Employees() {
                   <Mail className="h-3.5 w-3.5 text-gray-400" />
                   <span className="truncate">{emp.email}</span>
                 </div>
-                {emp.phone && (
+                {emp.phone && canSeePhone && (
                   <div className="flex items-center gap-2 text-sm text-gray-600">
                     <Phone className="h-3.5 w-3.5 text-gray-400" />
                     <span>{emp.phone}</span>
@@ -176,6 +186,7 @@ export default function Employees() {
                       onClick={(e) => e.stopPropagation()}
                     >
                       <option value="employee">Employee</option>
+                      <option value="charge_nurse">Charge Nurse</option>
                       <option value="manager">Manager</option>
                       <option value="admin">Admin</option>
                     </select>

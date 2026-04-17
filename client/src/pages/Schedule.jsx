@@ -16,10 +16,14 @@ import {
   eachDayOfInterval,
   isToday,
   isSameMonth,
+  addDays,
+  parseISO,
 } from 'date-fns';
-import { ChevronLeft, ChevronRight, Plus, Calendar } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Plus, Calendar, Download, Copy, AlertTriangle, RefreshCw, BanIcon, X } from 'lucide-react';
 import { schedulesAPI, usersAPI } from '../services/api';
 import { useAuth } from '../contexts/AuthContext';
+import jsPDF from 'jspdf';
+import autoTable from 'jspdf-autotable';
 import ShiftModal from '../components/schedule/ShiftModal';
 
 const STATUS_COLORS = {
@@ -363,6 +367,35 @@ export default function Schedule() {
   const [selectedShift, setSelectedShift] = useState(null);
   const [selectedDate, setSelectedDate] = useState('');
   const [filterEmployee, setFilterEmployee] = useState('');
+  const [showUnavailModal, setShowUnavailModal] = useState(false);
+  const [recurringUnavail, setRecurringUnavail] = useState([]);
+  const [unavailLoading, setUnavailLoading] = useState(false);
+
+  useEffect(() => {
+    if (!isAdmin) {
+      schedulesAPI.getRecurringUnavailability()
+        .then((res) => setRecurringUnavail(res.data || []))
+        .catch(() => {});
+    }
+  }, [isAdmin]);
+
+  const handleToggleUnavailDay = async (dayOfWeek) => {
+    const existing = recurringUnavail.find((r) => r.dayOfWeek === dayOfWeek);
+    setUnavailLoading(true);
+    try {
+      if (existing) {
+        await schedulesAPI.removeRecurringUnavailability(existing._id);
+        setRecurringUnavail((prev) => prev.filter((r) => r._id !== existing._id));
+      } else {
+        const res = await schedulesAPI.addRecurringUnavailability({ dayOfWeek });
+        setRecurringUnavail((prev) => [...prev, res.data]);
+      }
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setUnavailLoading(false);
+    }
+  };
 
   // Compute the fetch range for the current view
   const getRange = () => {
@@ -469,16 +502,32 @@ export default function Schedule() {
     ? employees.filter((e) => e._id === filterEmployee)
     : employees;
 
-  // Group displayed employees by position, sorted alphabetically
+  // Group displayed employees by position
+  // Manager position and manager-role users always sort to the top
+  const MANAGER_POSITIONS = ['Manager'];
+  const MANAGER_ROLES = ['admin', 'manager'];
+
   const positionGroups = [...displayedEmployees]
-    .sort((a, b) => a.name.localeCompare(b.name))
+    .sort((a, b) => {
+      // Manager role always before non-manager within the same position group
+      const aIsManager = MANAGER_ROLES.includes(a.role);
+      const bIsManager = MANAGER_ROLES.includes(b.role);
+      if (aIsManager !== bIsManager) return aIsManager ? -1 : 1;
+      return a.name.localeCompare(b.name);
+    })
     .reduce((acc, emp) => {
       const pos = emp.position || 'Unassigned';
       if (!acc[pos]) acc[pos] = [];
       acc[pos].push(emp);
       return acc;
     }, {});
-  const sortedPositions = Object.keys(positionGroups).sort();
+
+  const sortedPositions = Object.keys(positionGroups).sort((a, b) => {
+    const aIsManager = MANAGER_POSITIONS.includes(a);
+    const bIsManager = MANAGER_POSITIONS.includes(b);
+    if (aIsManager !== bIsManager) return aIsManager ? -1 : 1;
+    return a.localeCompare(b);
+  });
 
   // Get approved time off record for an employee on a given day (if any)
   const getTimeOff = (empId, day) => {
@@ -543,6 +592,67 @@ export default function Schedule() {
   const handleYearMonthClick = (month) => {
     setCurrentDate(month);
     setViewMode('monthly');
+  };
+
+  // ── Export schedule to PDF ────────────────────────────────────────────────
+  const handleExportPDF = () => {
+    const doc = new jsPDF({ orientation: 'landscape' });
+    doc.setFontSize(14);
+    doc.text(`Schedule — ${getTitle()}`, 14, 15);
+
+    const tableData = [];
+    sortedPositions.forEach((pos) => {
+      positionGroups[pos].forEach((emp) => {
+        const empShifts = filteredShifts.filter((s) => (s.employee?._id || s.employee) === emp._id);
+        if (viewMode === 'weekly') {
+          const row = [emp.name, emp.position || ''];
+          weekDays.forEach((day) => {
+            const ds = format(day, 'yyyy-MM-dd');
+            const s = empShifts.find((sh) => sh.date === ds);
+            row.push(s ? `${s.startTime}–${s.endTime}` : '');
+          });
+          tableData.push(row);
+        } else {
+          empShifts.forEach((s) => {
+            tableData.push([emp.name, emp.position || '', s.date, `${s.startTime}–${s.endTime}`, s.notes || '']);
+          });
+        }
+      });
+    });
+
+    const head = viewMode === 'weekly'
+      ? [['Name', 'Position', ...weekDays.map((d) => format(d, 'EEE M/d'))]]
+      : [['Name', 'Position', 'Date', 'Time', 'Notes']];
+
+    autoTable(doc, { head, body: tableData, startY: 22, styles: { fontSize: 8 }, headStyles: { fillColor: [37, 99, 235] } });
+    doc.save(`schedule-${getTitle().replace(/[^a-z0-9]/gi, '-')}.pdf`);
+  };
+
+  // ── Copy this week → next week ────────────────────────────────────────────
+  const [copying, setCopying] = useState(false);
+  const handleCopyWeek = async () => {
+    if (viewMode !== 'weekly') return;
+    if (!window.confirm('Copy all shifts from this week to next week? Conflicts will be skipped.')) return;
+    setCopying(true);
+    try {
+      const toCreate = filteredShifts.map((s) => ({
+        employee: s.employee?._id || s.employee,
+        date: format(addDays(parseISO(s.date), 7), 'yyyy-MM-dd'),
+        startTime: s.startTime,
+        endTime: s.endTime,
+        position: s.position,
+        department: s.department,
+        notes: s.notes,
+      }));
+      const res = await schedulesAPI.createShiftsBulk({ shifts: toCreate });
+      setShifts((prev) => [...prev, ...res.data.created]);
+      const msg = `Copied ${res.data.created.length} shifts. ${res.data.skipped.length} skipped (conflicts).`;
+      alert(msg);
+    } catch (err) {
+      alert(err.response?.data?.message || 'Copy failed');
+    } finally {
+      setCopying(false);
+    }
   };
 
   // ── Modal handlers ─────────────────────────────────────────────────────────
@@ -630,7 +740,28 @@ export default function Schedule() {
             </button>
           </div>
 
-          {isAdmin && (
+          <button
+            onClick={handleExportPDF}
+            className="flex items-center gap-2 border border-gray-300 hover:bg-gray-50 text-gray-700 px-3 py-2 rounded-lg text-sm font-medium transition-colors"
+            title="Export to PDF"
+          >
+            <Download className="h-4 w-4" />
+            Export
+          </button>
+
+          {isAdmin && viewMode === 'weekly' && (
+            <button
+              onClick={handleCopyWeek}
+              disabled={copying}
+              className="flex items-center gap-2 border border-gray-300 hover:bg-gray-50 text-gray-700 px-3 py-2 rounded-lg text-sm font-medium transition-colors disabled:opacity-50"
+              title="Copy this week's shifts to next week"
+            >
+              <Copy className="h-4 w-4" />
+              {copying ? 'Copying…' : 'Copy Week'}
+            </button>
+          )}
+
+{isAdmin && (
             <button
               onClick={() => openAddShift(format(new Date(), 'yyyy-MM-dd'))}
               className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors"
@@ -641,6 +772,59 @@ export default function Schedule() {
           )}
         </div>
       </div>
+
+      {/* Recurring Unavailability Modal */}
+      {showUnavailModal && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm">
+            <div className="flex items-center justify-between p-5 border-b border-gray-100">
+              <h2 className="font-bold text-lg text-gray-900">My Recurring Unavailability</h2>
+              <button onClick={() => setShowUnavailModal(false)} className="p-1 hover:bg-gray-100 rounded-lg">
+                <X className="h-5 w-5 text-gray-500" />
+              </button>
+            </div>
+            <div className="p-5 space-y-4">
+              <p className="text-sm text-gray-500">
+                Toggle days you are <strong>never available</strong>. Managers will see these when scheduling.
+              </p>
+              <div className="grid grid-cols-7 gap-1.5">
+                {['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].map((day, idx) => {
+                  const isUnavail = recurringUnavail.some((r) => r.dayOfWeek === idx);
+                  return (
+                    <button
+                      key={day}
+                      onClick={() => handleToggleUnavailDay(idx)}
+                      disabled={unavailLoading}
+                      className={`flex flex-col items-center py-2 rounded-lg border-2 text-xs font-semibold transition-colors disabled:opacity-50 ${
+                        isUnavail
+                          ? 'bg-red-500 text-white border-red-500'
+                          : 'bg-white text-gray-600 border-gray-200 hover:border-gray-400'
+                      }`}
+                    >
+                      {day}
+                      {isUnavail && <span className="text-[9px] mt-0.5 opacity-80">Off</span>}
+                    </button>
+                  );
+                })}
+              </div>
+              {recurringUnavail.length > 0 && (
+                <p className="text-xs text-gray-400">
+                  Unavailable: {recurringUnavail
+                    .sort((a, b) => a.dayOfWeek - b.dayOfWeek)
+                    .map((r) => ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'][r.dayOfWeek])
+                    .join(', ')}
+                </p>
+              )}
+              <button
+                onClick={() => setShowUnavailModal(false)}
+                className="w-full px-4 py-2 text-sm font-medium bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-colors"
+              >
+                Done
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {loading ? (
         <div className="flex justify-center py-16">

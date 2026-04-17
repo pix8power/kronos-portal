@@ -1,7 +1,9 @@
 import { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { Calendar, Eye, EyeOff } from 'lucide-react';
+import { Calendar, Eye, EyeOff, AlertTriangle } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
+
+const MAX_ATTEMPTS = 3;
 
 export default function Login() {
   const { login } = useAuth();
@@ -10,6 +12,10 @@ export default function Login() {
   const [showPw, setShowPw] = useState(false);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
+  const [failCount, setFailCount] = useState(0);
+  const [locked, setLocked] = useState(false);
+
+  const showRecovery = failCount >= MAX_ATTEMPTS || locked;
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -19,7 +25,25 @@ export default function Login() {
       await login(form.email, form.password);
       navigate('/');
     } catch (err) {
-      setError(err.response?.data?.message || 'Login failed');
+      const data = err.response?.data;
+      const status = err.response?.status;
+
+      if (status === 423 || data?.locked) {
+        setLocked(true);
+        setError(data?.message || 'Account temporarily locked.');
+      } else {
+        const newCount = failCount + 1;
+        setFailCount(newCount);
+        const attemptsLeft = data?.attemptsLeft ?? Math.max(0, MAX_ATTEMPTS - newCount);
+
+        if (attemptsLeft === 0 || newCount >= MAX_ATTEMPTS) {
+          setError('Too many failed attempts. Please reset your password.');
+        } else {
+          setError(
+            `${data?.message || 'Invalid credentials'} — ${attemptsLeft} attempt${attemptsLeft !== 1 ? 's' : ''} remaining.`
+          );
+        }
+      }
     } finally {
       setLoading(false);
     }
@@ -37,8 +61,13 @@ export default function Login() {
         </div>
 
         {error && (
-          <div className="bg-red-50 border border-red-200 text-red-700 rounded-lg px-4 py-3 text-sm mb-4">
-            {error}
+          <div className={`border rounded-lg px-4 py-3 text-sm mb-4 flex items-start gap-2 ${
+            showRecovery
+              ? 'bg-amber-50 border-amber-300 text-amber-800'
+              : 'bg-red-50 border-red-200 text-red-700'
+          }`}>
+            {showRecovery && <AlertTriangle className="h-4 w-4 mt-0.5 shrink-0" />}
+            <span>{error}</span>
           </div>
         )}
 
@@ -50,7 +79,8 @@ export default function Login() {
               required
               value={form.email}
               onChange={(e) => setForm({ ...form, email: e.target.value })}
-              className="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+              disabled={locked}
+              className="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent disabled:bg-gray-50 disabled:text-gray-400"
               placeholder="you@example.com"
             />
           </div>
@@ -63,7 +93,8 @@ export default function Login() {
                 required
                 value={form.password}
                 onChange={(e) => setForm({ ...form, password: e.target.value })}
-                className="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent pr-10"
+                disabled={locked}
+                className="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent pr-10 disabled:bg-gray-50 disabled:text-gray-400"
                 placeholder="••••••••"
               />
               <button
@@ -76,14 +107,37 @@ export default function Login() {
             </div>
           </div>
 
-          <button
-            type="submit"
-            disabled={loading}
-            className="w-full bg-blue-600 hover:bg-blue-700 disabled:bg-blue-400 text-white font-semibold py-2.5 rounded-lg transition-colors"
-          >
-            {loading ? 'Signing in...' : 'Sign In'}
-          </button>
+          {!showRecovery && (
+            <button
+              type="submit"
+              disabled={loading || locked}
+              className="w-full bg-blue-600 hover:bg-blue-700 disabled:bg-blue-400 text-white font-semibold py-2.5 rounded-lg transition-colors"
+            >
+              {loading ? 'Signing in...' : 'Sign In'}
+            </button>
+          )}
         </form>
+
+        {/* Recover password — shown after 3 failures or lock */}
+        {showRecovery && (
+          <div className="mt-4 p-4 bg-amber-50 border border-amber-200 rounded-xl text-center space-y-3">
+            <p className="text-sm font-medium text-amber-900">Having trouble signing in?</p>
+            <Link
+              to={`/forgot-password${form.email ? `?email=${encodeURIComponent(form.email)}` : ''}`}
+              className="block w-full bg-amber-500 hover:bg-amber-600 text-white font-semibold py-2.5 rounded-lg transition-colors text-sm"
+            >
+              Reset my password
+            </Link>
+            {!locked && (
+              <button
+                onClick={() => { setFailCount(0); setError(''); }}
+                className="text-xs text-amber-700 hover:text-amber-900 underline"
+              >
+                Try again anyway
+              </button>
+            )}
+          </div>
+        )}
 
         <p className="text-center text-sm text-gray-500 mt-6">
           Don&apos;t have an account?{' '}
@@ -91,11 +145,6 @@ export default function Login() {
             Register
           </Link>
         </p>
-
-        {/* Demo credentials */}
-        <div className="mt-4 p-3 bg-gray-50 rounded-lg text-xs text-gray-500">
-          <p className="font-medium text-gray-700 mb-1">Demo: Create an admin account first via Register</p>
-        </div>
       </div>
     </div>
   );

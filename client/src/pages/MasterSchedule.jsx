@@ -1,0 +1,500 @@
+import { useState, useEffect, useCallback } from 'react';
+import { format, nextSunday, isSunday, parseISO, startOfDay } from 'date-fns';
+import {
+  CalendarRange,
+  Plus,
+  Trash2,
+  RefreshCw,
+  Save,
+  ChevronDown,
+  ChevronUp,
+  AlertCircle,
+  CheckCircle,
+} from 'lucide-react';
+import { masterScheduleAPI, usersAPI } from '../services/api';
+import { useAuth } from '../contexts/AuthContext';
+
+const DAY_NAMES = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+const DAY_FULL = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+
+// Find the most recent or upcoming Sunday for an anchor date
+function getNearestSunday(date = new Date()) {
+  const d = startOfDay(date);
+  if (isSunday(d)) return d;
+  return nextSunday(d);
+}
+
+const ROLE_CAN_MANAGE = ['admin', 'manager', 'charge_nurse'];
+
+export default function MasterSchedule() {
+  const { user } = useAuth();
+  const [schedule, setSchedule] = useState(null);
+  const [users, setUsers] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [applyResult, setApplyResult] = useState(null);
+  const [applyError, setApplyError] = useState(null);
+  const [showApplyModal, setShowApplyModal] = useState(false);
+  const [replaceExisting, setReplaceExisting] = useState(false);
+  const [applying, setApplying] = useState(false);
+
+  // Add entry form state
+  const [addForm, setAddForm] = useState(null); // { week, dayOfWeek } or null
+
+  const canManage = ROLE_CAN_MANAGE.includes(user?.role);
+
+  const loadData = useCallback(async () => {
+    setLoading(true);
+    try {
+      const [schedRes, usersRes] = await Promise.all([
+        masterScheduleAPI.get(),
+        usersAPI.getAll(),
+      ]);
+      setSchedule(schedRes.data);
+      setUsers(usersRes.data || []);
+    } catch {
+      setSchedule(null);
+      setUsers([]);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    loadData();
+  }, [loadData]);
+
+  async function handleCreate() {
+    const anchorDate = format(getNearestSunday(), 'yyyy-MM-dd');
+    setSaving(true);
+    try {
+      const res = await masterScheduleAPI.create({ name: 'Master Schedule', anchorDate });
+      setSchedule(res.data);
+    } catch (err) {
+      alert(err.response?.data?.message || 'Failed to create schedule');
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function handleUpdateAnchor(newDate) {
+    if (!schedule) return;
+    try {
+      const res = await masterScheduleAPI.update(schedule._id, { anchorDate: newDate });
+      setSchedule(res.data);
+    } catch (err) {
+      alert(err.response?.data?.message || 'Failed to update anchor date');
+    }
+  }
+
+  async function handleAddEntry(entryData) {
+    if (!schedule) return;
+    setSaving(true);
+    try {
+      const res = await masterScheduleAPI.addEntry(schedule._id, entryData);
+      setSchedule(res.data);
+      setAddForm(null);
+    } catch (err) {
+      alert(err.response?.data?.message || 'Failed to add entry');
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function handleRemoveEntry(entryId) {
+    if (!schedule) return;
+    try {
+      const res = await masterScheduleAPI.removeEntry(schedule._id, entryId);
+      setSchedule(res.data);
+    } catch (err) {
+      alert(err.response?.data?.message || 'Failed to remove entry');
+    }
+  }
+
+  async function handleApply() {
+    if (!schedule) return;
+    setApplying(true);
+    setApplyResult(null);
+    setApplyError(null);
+    try {
+      const res = await masterScheduleAPI.apply(schedule._id, { replaceExisting });
+      setApplyResult(res.data);
+      setShowApplyModal(false);
+    } catch (err) {
+      setApplyError(err.response?.data?.message || 'Failed to apply schedule');
+    } finally {
+      setApplying(false);
+    }
+  }
+
+  // Group entries by week + dayOfWeek
+  function getEntriesFor(week, dayOfWeek) {
+    if (!schedule?.entries) return [];
+    return schedule.entries.filter((e) => e.week === week && e.dayOfWeek === dayOfWeek);
+  }
+
+  if (loading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center">
+        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600" />
+      </div>
+    );
+  }
+
+  return (
+    <div className="p-6 max-w-7xl mx-auto">
+      {/* Header */}
+      <div className="flex items-center justify-between mb-6">
+        <div className="flex items-center gap-3">
+          <CalendarRange className="h-7 w-7 text-blue-600" />
+          <div>
+            <h1 className="text-2xl font-bold text-gray-900">Master Schedule</h1>
+            <p className="text-sm text-gray-500">2-week rotating template that applies to staff's annual schedule</p>
+          </div>
+        </div>
+        {canManage && schedule && (
+          <button
+            onClick={() => { setShowApplyModal(true); setApplyResult(null); setApplyError(null); }}
+            className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 font-medium"
+          >
+            <RefreshCw className="h-4 w-4" />
+            Apply to Schedule
+          </button>
+        )}
+      </div>
+
+      {/* Apply result banner */}
+      {applyResult && (
+        <div className="mb-4 p-4 bg-green-50 border border-green-200 rounded-lg flex items-start gap-3">
+          <CheckCircle className="h-5 w-5 text-green-600 mt-0.5 shrink-0" />
+          <div>
+            <p className="font-medium text-green-800">{applyResult.message}</p>
+          </div>
+          <button onClick={() => setApplyResult(null)} className="ml-auto text-green-600 hover:text-green-800 text-lg leading-none">&times;</button>
+        </div>
+      )}
+      {applyError && (
+        <div className="mb-4 p-4 bg-red-50 border border-red-200 rounded-lg flex items-start gap-3">
+          <AlertCircle className="h-5 w-5 text-red-600 mt-0.5 shrink-0" />
+          <p className="font-medium text-red-800">{applyError}</p>
+          <button onClick={() => setApplyError(null)} className="ml-auto text-red-600 hover:text-red-800 text-lg leading-none">&times;</button>
+        </div>
+      )}
+
+      {/* No schedule yet */}
+      {!schedule && canManage && (
+        <div className="text-center py-16 bg-white rounded-xl border border-dashed border-gray-300">
+          <CalendarRange className="h-12 w-12 text-gray-400 mx-auto mb-4" />
+          <h2 className="text-lg font-semibold text-gray-700 mb-2">No Master Schedule Yet</h2>
+          <p className="text-gray-500 mb-6">Create a 2-week rotating template to apply across the year.</p>
+          <button
+            onClick={handleCreate}
+            disabled={saving}
+            className="px-5 py-2.5 bg-blue-600 text-white rounded-lg hover:bg-blue-700 font-medium disabled:opacity-50"
+          >
+            {saving ? 'Creating...' : 'Create Master Schedule'}
+          </button>
+        </div>
+      )}
+
+      {!schedule && !canManage && (
+        <div className="text-center py-16 bg-white rounded-xl border border-gray-200">
+          <CalendarRange className="h-12 w-12 text-gray-300 mx-auto mb-4" />
+          <p className="text-gray-500">No master schedule has been set up yet.</p>
+        </div>
+      )}
+
+      {/* Schedule grid */}
+      {schedule && (
+        <>
+          {/* Anchor date picker */}
+          {canManage && (
+            <div className="mb-5 p-4 bg-white rounded-xl border border-gray-200 flex items-center gap-4 flex-wrap">
+              <div>
+                <label className="block text-xs font-medium text-gray-500 mb-1">Week 1 Start (Sunday)</label>
+                <input
+                  type="date"
+                  value={schedule.anchorDate}
+                  onChange={(e) => {
+                    const d = parseISO(e.target.value);
+                    if (!isSunday(d)) {
+                      alert('Anchor date must be a Sunday. Please pick a Sunday.');
+                      return;
+                    }
+                    handleUpdateAnchor(e.target.value);
+                  }}
+                  className="border border-gray-300 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                />
+              </div>
+              <p className="text-sm text-gray-500 mt-4">
+                Week 1 begins on {format(parseISO(schedule.anchorDate), 'MMMM d, yyyy')}. The 2-week pattern repeats every 14 days.
+              </p>
+            </div>
+          )}
+
+          {/* Week grids */}
+          {[1, 2].map((week) => (
+            <div key={week} className="mb-6 bg-white rounded-xl border border-gray-200 overflow-hidden">
+              <div className="bg-blue-600 text-white px-4 py-3">
+                <h2 className="font-semibold text-base">Week {week}</h2>
+              </div>
+              <div className="overflow-x-auto">
+                <table className="w-full border-collapse min-w-[700px]">
+                  <thead>
+                    <tr className="bg-gray-50 border-b border-gray-200">
+                      {DAY_NAMES.map((d, i) => (
+                        <th key={i} className="px-3 py-2 text-xs font-semibold text-gray-600 text-center border-r border-gray-200 last:border-r-0 w-[14.28%]">
+                          {d}
+                        </th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr>
+                      {DAY_NAMES.map((_, dayOfWeek) => {
+                        const entries = getEntriesFor(week, dayOfWeek);
+                        return (
+                          <td
+                            key={dayOfWeek}
+                            className="border-r border-gray-200 last:border-r-0 p-2 align-top min-h-[120px]"
+                          >
+                            <div className="space-y-1 min-h-[80px]">
+                              {entries.map((entry) => (
+                                <ShiftChip
+                                  key={entry._id}
+                                  entry={entry}
+                                  canManage={canManage}
+                                  onRemove={() => handleRemoveEntry(entry._id)}
+                                />
+                              ))}
+                            </div>
+                            {canManage && (
+                              <button
+                                onClick={() => setAddForm({ week, dayOfWeek })}
+                                className="mt-1 w-full text-xs text-blue-500 hover:text-blue-700 hover:bg-blue-50 rounded py-1 flex items-center justify-center gap-1 border border-dashed border-blue-200 hover:border-blue-400 transition-colors"
+                              >
+                                <Plus className="h-3 w-3" />
+                                Add
+                              </button>
+                            )}
+                          </td>
+                        );
+                      })}
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          ))}
+        </>
+      )}
+
+      {/* Add entry modal */}
+      {addForm && (
+        <AddEntryModal
+          week={addForm.week}
+          dayOfWeek={addForm.dayOfWeek}
+          users={users}
+          onAdd={handleAddEntry}
+          onClose={() => setAddForm(null)}
+        />
+      )}
+
+      {/* Apply modal */}
+      {showApplyModal && (
+        <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-xl shadow-xl w-full max-w-md">
+            <div className="p-6">
+              <div className="flex items-center gap-3 mb-4">
+                <RefreshCw className="h-6 w-6 text-blue-600" />
+                <h2 className="text-lg font-semibold text-gray-900">Apply to Annual Schedule</h2>
+              </div>
+              <p className="text-sm text-gray-600 mb-4">
+                This will generate shifts on the main schedule based on the 2-week rotating template, starting from{' '}
+                <strong>{schedule && format(parseISO(schedule.anchorDate), 'MMMM d, yyyy')}</strong> for 52 weeks (364 days).
+              </p>
+              <label className="flex items-start gap-3 cursor-pointer mb-6">
+                <input
+                  type="checkbox"
+                  checked={replaceExisting}
+                  onChange={(e) => setReplaceExisting(e.target.checked)}
+                  className="mt-0.5 h-4 w-4 rounded border-gray-300 text-blue-600"
+                />
+                <div>
+                  <span className="text-sm font-medium text-gray-800">Replace existing shifts in range</span>
+                  <p className="text-xs text-gray-500 mt-0.5">
+                    If unchecked, only days with no existing shift will be filled. If checked, all shifts in the range created by you will be replaced.
+                  </p>
+                </div>
+              </label>
+              {applyError && (
+                <div className="mb-4 p-3 bg-red-50 border border-red-200 rounded-lg text-sm text-red-700">
+                  {applyError}
+                </div>
+              )}
+              <div className="flex gap-3 justify-end">
+                <button
+                  onClick={() => setShowApplyModal(false)}
+                  className="px-4 py-2 text-sm font-medium text-gray-700 border border-gray-300 rounded-lg hover:bg-gray-50"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={handleApply}
+                  disabled={applying}
+                  className="px-4 py-2 text-sm font-medium text-white bg-blue-600 rounded-lg hover:bg-blue-700 disabled:opacity-50 flex items-center gap-2"
+                >
+                  {applying ? (
+                    <>
+                      <div className="animate-spin rounded-full h-3 w-3 border-b-2 border-white" />
+                      Applying...
+                    </>
+                  ) : (
+                    'Apply Now'
+                  )}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function ShiftChip({ entry, canManage, onRemove }) {
+  const emp = entry.employee;
+  const name = emp?.name || 'Unknown';
+  const color = emp?.color || '#3B82F6';
+
+  return (
+    <div
+      className="relative group flex items-start gap-1.5 p-1.5 rounded-md text-xs text-white"
+      style={{ backgroundColor: color }}
+    >
+      <div className="flex-1 min-w-0">
+        <p className="font-semibold truncate">{name}</p>
+        <p className="opacity-90">{entry.startTime} – {entry.endTime}</p>
+        {entry.position && <p className="opacity-75 truncate">{entry.position}</p>}
+      </div>
+      {canManage && (
+        <button
+          onClick={onRemove}
+          className="opacity-0 group-hover:opacity-100 transition-opacity p-0.5 hover:bg-black/20 rounded"
+          title="Remove"
+        >
+          <Trash2 className="h-3 w-3" />
+        </button>
+      )}
+    </div>
+  );
+}
+
+function AddEntryModal({ week, dayOfWeek, users, onAdd, onClose }) {
+  const [form, setForm] = useState({
+    employee: '',
+    startTime: '08:00',
+    endTime: '16:00',
+    position: '',
+    notes: '',
+  });
+  const [saving, setSaving] = useState(false);
+
+  const employees = users.filter((u) => u.role !== 'admin');
+
+  async function handleSubmit(e) {
+    e.preventDefault();
+    if (!form.employee) return;
+    setSaving(true);
+    await onAdd({ week, dayOfWeek, ...form });
+    setSaving(false);
+  }
+
+  return (
+    <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
+      <div className="bg-white rounded-xl shadow-xl w-full max-w-sm">
+        <div className="p-5">
+          <h2 className="text-base font-semibold text-gray-900 mb-4">
+            Add Shift — Week {week}, {DAY_FULL[dayOfWeek]}
+          </h2>
+          <form onSubmit={handleSubmit} className="space-y-3">
+            <div>
+              <label className="block text-xs font-medium text-gray-700 mb-1">Staff Member *</label>
+              <select
+                value={form.employee}
+                onChange={(e) => setForm({ ...form, employee: e.target.value })}
+                required
+                className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+              >
+                <option value="">Select staff member</option>
+                {employees.map((u) => (
+                  <option key={u._id} value={u._id}>
+                    {u.name}{u.position ? ` — ${u.position}` : ''}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="block text-xs font-medium text-gray-700 mb-1">Start Time *</label>
+                <input
+                  type="time"
+                  value={form.startTime}
+                  onChange={(e) => setForm({ ...form, startTime: e.target.value })}
+                  required
+                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-gray-700 mb-1">End Time *</label>
+                <input
+                  type="time"
+                  value={form.endTime}
+                  onChange={(e) => setForm({ ...form, endTime: e.target.value })}
+                  required
+                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                />
+              </div>
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-gray-700 mb-1">Position</label>
+              <input
+                type="text"
+                value={form.position}
+                onChange={(e) => setForm({ ...form, position: e.target.value })}
+                placeholder="e.g. RN, CNA"
+                className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-gray-700 mb-1">Notes</label>
+              <input
+                type="text"
+                value={form.notes}
+                onChange={(e) => setForm({ ...form, notes: e.target.value })}
+                placeholder="Optional notes"
+                className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+              />
+            </div>
+            <div className="flex gap-3 pt-1">
+              <button
+                type="button"
+                onClick={onClose}
+                className="flex-1 px-4 py-2 text-sm font-medium text-gray-700 border border-gray-300 rounded-lg hover:bg-gray-50"
+              >
+                Cancel
+              </button>
+              <button
+                type="submit"
+                disabled={saving}
+                className="flex-1 px-4 py-2 text-sm font-medium text-white bg-blue-600 rounded-lg hover:bg-blue-700 disabled:opacity-50"
+              >
+                {saving ? 'Adding...' : 'Add Shift'}
+              </button>
+            </div>
+          </form>
+        </div>
+      </div>
+    </div>
+  );
+}

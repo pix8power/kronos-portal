@@ -1,9 +1,34 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { format, isToday, isYesterday } from 'date-fns';
-import { Send, Users, Phone, MoreVertical, ArrowLeft, Check, CheckCheck } from 'lucide-react';
+import { Send, Users, Phone, MoreVertical, ArrowLeft, Check, CheckCheck, Smile, CornerUpLeft, X } from 'lucide-react';
 import { messagesAPI } from '../../services/api';
 import { useAuth } from '../../contexts/AuthContext';
 import { useSocket } from '../../contexts/SocketContext';
+
+const EMOJIS = [
+  '😀','😂','😍','🥰','😎','😊','🙏','👍','👎','❤️',
+  '🔥','✅','⭐','🎉','👏','💪','😅','🤔','😢','😡',
+  '🙌','💯','🤝','👋','😴','🤒','💊','🏥','📋','⏰',
+];
+
+function EmojiPicker({ onSelect }) {
+  return (
+    <div className="absolute bottom-14 left-0 bg-white rounded-xl shadow-xl border border-gray-200 p-3 z-50 w-64">
+      <div className="grid grid-cols-10 gap-1">
+        {EMOJIS.map((emoji) => (
+          <button
+            key={emoji}
+            type="button"
+            onClick={() => onSelect(emoji)}
+            className="text-xl hover:bg-gray-100 rounded-lg p-0.5 transition-colors leading-none"
+          >
+            {emoji}
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
 
 const formatMsgTime = (d) => format(new Date(d), 'HH:mm');
 const formatDateDivider = (d) => {
@@ -28,8 +53,33 @@ export default function ChatWindow({ conversation, onBack }) {
   const [loading, setLoading] = useState(true);
   const [typing, setTyping] = useState([]);
   const [sending, setSending] = useState(false);
+  const [showEmoji, setShowEmoji] = useState(false);
+  const [replyingTo, setReplyingTo] = useState(null);
   const bottomRef = useRef(null);
   const typingTimeoutRef = useRef(null);
+  const emojiRef = useRef(null);
+  const textareaRef = useRef(null);
+
+  // Close emoji picker on outside click
+  useEffect(() => {
+    const handler = (e) => { if (emojiRef.current && !emojiRef.current.contains(e.target)) setShowEmoji(false); };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, []);
+
+  const insertEmoji = (emoji) => {
+    const el = textareaRef.current;
+    if (!el) { setInput((v) => v + emoji); return; }
+    const start = el.selectionStart;
+    const end = el.selectionEnd;
+    const newVal = input.slice(0, start) + emoji + input.slice(end);
+    setInput(newVal);
+    setShowEmoji(false);
+    requestAnimationFrame(() => {
+      el.focus();
+      el.setSelectionRange(start + emoji.length, start + emoji.length);
+    });
+  };
 
   const other = !conversation.isGroup
     ? conversation.participants?.find((p) => p._id !== user?._id)
@@ -58,7 +108,15 @@ export default function ChatWindow({ conversation, onBack }) {
     const onNewMessage = ({ conversationId, message }) => {
       if (conversationId === conversation._id) {
         setMessages((prev) => {
+          // Already have this exact message
           if (prev.find((m) => m._id === message._id)) return prev;
+          // Replace our own optimistic temp message with the real one
+          const tempIdx = prev.findIndex((m) => m._temp && m.sender?._id === message.sender?._id);
+          if (tempIdx !== -1) {
+            const next = [...prev];
+            next[tempIdx] = message;
+            return next;
+          }
           return [...prev, message];
         });
         socket.emit('markRead', { conversationId });
@@ -114,6 +172,8 @@ export default function ChatWindow({ conversation, onBack }) {
     if (!content || sending) return;
 
     setInput('');
+    const replyRef = replyingTo;
+    setReplyingTo(null);
     setSending(true);
 
     // Optimistic update
@@ -123,6 +183,7 @@ export default function ChatWindow({ conversation, onBack }) {
       sender: user,
       createdAt: new Date().toISOString(),
       readBy: [user._id],
+      replyTo: replyRef || null,
       _temp: true,
     };
     setMessages((prev) => [...prev, tempMsg]);
@@ -130,15 +191,23 @@ export default function ChatWindow({ conversation, onBack }) {
     try {
       const socket = getSocket();
       if (socket?.connected) {
-        socket.emit('sendMessage', { conversationId: conversation._id, content });
+        socket.emit('sendMessage', {
+          conversationId: conversation._id,
+          content,
+          replyTo: replyRef?._id || null,
+        });
         socket.emit('stopTyping', { conversationId: conversation._id });
       } else {
-        const res = await messagesAPI.sendMessage(conversation._id, { content });
+        const res = await messagesAPI.sendMessage(conversation._id, {
+          content,
+          replyTo: replyRef?._id || null,
+        });
         setMessages((prev) => prev.map((m) => (m._id === tempMsg._id ? res.data : m)));
       }
     } catch {
       setMessages((prev) => prev.filter((m) => m._id !== tempMsg._id));
       setInput(content);
+      setReplyingTo(replyRef);
     } finally {
       setSending(false);
     }
@@ -218,7 +287,7 @@ export default function ChatWindow({ conversation, onBack }) {
                   </div>
                 )}
 
-                <div className={`flex items-end gap-2 mb-1 ${isMine ? 'flex-row-reverse' : ''}`}>
+                <div className={`flex items-end gap-1 mb-1 group ${isMine ? 'flex-row-reverse' : ''}`}>
                   {/* Avatar for group chats */}
                   {!isMine && conversation.isGroup && (
                     <div
@@ -229,6 +298,15 @@ export default function ChatWindow({ conversation, onBack }) {
                     </div>
                   )}
 
+                  {/* Reply button — visible on hover (desktop) or always subtle (mobile) */}
+                  <button
+                    onClick={() => { setReplyingTo(msg); textareaRef.current?.focus(); }}
+                    className="opacity-0 group-hover:opacity-100 transition-opacity p-1 text-gray-400 hover:text-blue-500 hover:bg-gray-100 rounded-full flex-shrink-0 self-center"
+                    title="Reply"
+                  >
+                    <CornerUpLeft className="h-3.5 w-3.5" />
+                  </button>
+
                   <div className={`max-w-[70%] ${isMine ? 'items-end' : 'items-start'} flex flex-col`}>
                     {/* Sender name in groups */}
                     {!isMine && conversation.isGroup && i === 0 ||
@@ -237,12 +315,27 @@ export default function ChatWindow({ conversation, onBack }) {
                     ) : null}
 
                     <div
-                      className={`px-4 py-2 rounded-2xl text-sm ${
+                      className={`px-3 py-2 rounded-2xl text-sm ${
                         isMine
                           ? 'bg-blue-600 text-white rounded-br-sm'
                           : 'bg-white text-gray-900 shadow-sm border border-gray-100 rounded-bl-sm'
                       } ${msg._temp ? 'opacity-70' : ''}`}
                     >
+                      {/* Quoted reply block */}
+                      {msg.replyTo && (
+                        <div className={`mb-2 px-2 py-1.5 rounded-lg text-xs border-l-2 ${
+                          isMine
+                            ? 'bg-blue-500/40 border-white/60 text-blue-100'
+                            : 'bg-gray-100 border-blue-400 text-gray-600'
+                        }`}>
+                          <p className="font-semibold mb-0.5">
+                            {msg.replyTo.sender?.name || 'Unknown'}
+                          </p>
+                          <p className="truncate opacity-80">
+                            {msg.replyTo.content || '…'}
+                          </p>
+                        </div>
+                      )}
                       <p className="whitespace-pre-wrap break-words">{msg.content}</p>
                     </div>
 
@@ -281,9 +374,39 @@ export default function ChatWindow({ conversation, onBack }) {
       </div>
 
       {/* Input */}
-      <div className="bg-white border-t border-gray-200 p-3">
-        <form onSubmit={sendMessage} className="flex items-end gap-2">
+      <div className="bg-white border-t border-gray-200">
+        {/* Reply preview bar */}
+        {replyingTo && (
+          <div className="flex items-center gap-2 px-3 pt-2 pb-1 bg-blue-50 border-b border-blue-100">
+            <CornerUpLeft className="h-3.5 w-3.5 text-blue-500 flex-shrink-0" />
+            <div className="flex-1 min-w-0">
+              <p className="text-xs font-semibold text-blue-700">{replyingTo.sender?.name || 'Unknown'}</p>
+              <p className="text-xs text-blue-600 truncate">{replyingTo.content}</p>
+            </div>
+            <button
+              type="button"
+              onClick={() => setReplyingTo(null)}
+              className="p-1 text-blue-400 hover:text-blue-600 rounded-full hover:bg-blue-100"
+            >
+              <X className="h-3.5 w-3.5" />
+            </button>
+          </div>
+        )}
+        <form onSubmit={sendMessage} className="flex items-end gap-2 p-3">
+          {/* Emoji picker */}
+          <div ref={emojiRef} className="relative flex-shrink-0">
+            <button
+              type="button"
+              onClick={() => setShowEmoji((v) => !v)}
+              className="w-10 h-10 flex items-center justify-center text-gray-400 hover:text-yellow-500 hover:bg-gray-100 rounded-full transition-colors"
+            >
+              <Smile className="h-5 w-5" />
+            </button>
+            {showEmoji && <EmojiPicker onSelect={insertEmoji} />}
+          </div>
+
           <textarea
+            ref={textareaRef}
             value={input}
             onChange={handleInputChange}
             onKeyDown={handleKeyDown}

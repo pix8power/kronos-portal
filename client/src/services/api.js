@@ -26,10 +26,13 @@ export const authAPI = {
   register: (data) => api.post('/auth/register', data),
   me: () => api.get('/auth/me'),
   logout: () => api.post('/auth/logout'),
+  forgotPassword: (email) => api.post('/auth/forgot-password', { email }),
+  resetPassword: (token, password) => api.post(`/auth/reset-password/${token}`, { password }),
 };
 
 export const usersAPI = {
   getAll: () => api.get('/users'),
+  search: (q) => api.get('/users/search', { params: { q } }),
   getById: (id) => api.get(`/users/${id}`),
   update: (id, data) => api.put(`/users/${id}`, data),
   updateRole: (id, role) => api.patch(`/users/${id}/role`, { role }),
@@ -39,8 +42,11 @@ export const usersAPI = {
 export const schedulesAPI = {
   getShifts: (params) => api.get('/schedules/shifts', { params }),
   createShift: (data) => api.post('/schedules/shifts', data),
+  createShiftsBulk: (data) => api.post('/schedules/shifts/bulk', data),
   updateShift: (id, data) => api.put(`/schedules/shifts/${id}`, data),
   deleteShift: (id) => api.delete(`/schedules/shifts/${id}`),
+  clockIn: (id) => api.patch(`/schedules/shifts/${id}/clock-in`),
+  clockOut: (id) => api.patch(`/schedules/shifts/${id}/clock-out`),
   getTimeOff: (params) => api.get('/schedules/timeoff', { params }),
   requestTimeOff: (data) => api.post('/schedules/timeoff', data),
   reviewTimeOff: (id, data) => api.patch(`/schedules/timeoff/${id}`, data),
@@ -48,6 +54,16 @@ export const schedulesAPI = {
   getAvailability: (params) => api.get('/schedules/availability', { params }),
   addAvailability: (data) => api.post('/schedules/availability', data),
   removeAvailability: (id) => api.delete(`/schedules/availability/${id}`),
+  getRecurringUnavailability: () => api.get('/schedules/recurring-unavailability'),
+  addRecurringUnavailability: (data) => api.post('/schedules/recurring-unavailability', data),
+  removeRecurringUnavailability: (id) => api.delete(`/schedules/recurring-unavailability/${id}`),
+  getAuditLog: (params) => api.get('/schedules/audit', { params }),
+};
+
+export const notificationsAPI = {
+  getAll: () => api.get('/notifications'),
+  markRead: (id) => api.patch(`/notifications/${id}/read`),
+  markAllRead: () => api.patch('/notifications/read-all'),
 };
 
 export const messagesAPI = {
@@ -66,6 +82,15 @@ export const exchangeAPI = {
   respond: (id, data) => api.post(`/schedules/exchanges/${id}/respond`, data),
   approve: (id, data) => api.patch(`/schedules/exchanges/${id}`, data),
   cancel: (id) => api.delete(`/schedules/exchanges/${id}`),
+};
+
+export const masterScheduleAPI = {
+  get: () => api.get('/master-schedule'),
+  create: (data) => api.post('/master-schedule', data),
+  update: (id, data) => api.patch(`/master-schedule/${id}`, data),
+  addEntry: (id, data) => api.post(`/master-schedule/${id}/entries`, data),
+  removeEntry: (id, entryId) => api.delete(`/master-schedule/${id}/entries/${entryId}`),
+  apply: (id, data) => api.post(`/master-schedule/${id}/apply`, data),
 };
 
 export const timeCorrectionAPI = {

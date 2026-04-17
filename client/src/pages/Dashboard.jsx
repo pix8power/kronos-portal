@@ -4,6 +4,7 @@ import { format, startOfWeek, endOfWeek, addWeeks } from 'date-fns';
 import {
   Calendar, MessageCircle, Users, Clock, TrendingUp, ChevronRight,
   AlarmClockPlus, Plus, Check, X, Trash2, AlertCircle, ArrowLeftRight,
+  LogIn, LogOut,
 } from 'lucide-react';
 import { schedulesAPI, usersAPI, messagesAPI, timeCorrectionAPI, exchangeAPI } from '../services/api';
 import { differenceInCalendarDays, parseISO } from 'date-fns';
@@ -1105,9 +1106,34 @@ function ShiftExchangeTab({ user }) {
 
 // ── Overview tab (original dashboard content) ─────────────────────────────────
 function OverviewTab({ user, todayShifts, weekShifts, employees, conversations }) {
-  const myShifts = todayShifts.filter(
-    (s) => s.employee?._id === user?._id || s.employee === user?._id
+  const [myShifts, setMyShifts] = useState(() =>
+    todayShifts.filter((s) => s.employee?._id === user?._id || s.employee === user?._id)
   );
+  const [clockLoading, setClockLoading] = useState(null);
+
+  const handleClockIn = async (shiftId) => {
+    setClockLoading(shiftId);
+    try {
+      const res = await schedulesAPI.clockIn(shiftId);
+      setMyShifts((prev) => prev.map((s) => (s._id === shiftId ? { ...s, ...res.data } : s)));
+    } catch (err) {
+      console.error('Clock in failed', err);
+    } finally {
+      setClockLoading(null);
+    }
+  };
+
+  const handleClockOut = async (shiftId) => {
+    setClockLoading(shiftId);
+    try {
+      const res = await schedulesAPI.clockOut(shiftId);
+      setMyShifts((prev) => prev.map((s) => (s._id === shiftId ? { ...s, ...res.data } : s)));
+    } catch (err) {
+      console.error('Clock out failed', err);
+    } finally {
+      setClockLoading(null);
+    }
+  };
 
   const stats = [
     {
@@ -1156,6 +1182,66 @@ function OverviewTab({ user, todayShifts, weekShifts, employees, conversations }
           </div>
         ))}
       </div>
+
+      {/* My Shifts Today — clock-in/out widget */}
+      {myShifts.length > 0 && (
+        <div className="bg-white rounded-xl shadow-sm border border-gray-100 mb-6">
+          <div className="flex items-center gap-2 p-5 border-b border-gray-100">
+            <Clock className="h-4 w-4 text-blue-600" />
+            <h2 className="font-semibold text-gray-900">My Shifts Today</h2>
+          </div>
+          <div className="divide-y divide-gray-50">
+            {myShifts.map((shift) => {
+              const isBusy = clockLoading === shift._id;
+              const clockInTime = shift.clockIn ? format(new Date(shift.clockIn), 'h:mm a') : null;
+              const clockOutTime = shift.clockOut ? format(new Date(shift.clockOut), 'h:mm a') : null;
+              return (
+                <div key={shift._id} className="flex flex-wrap items-center justify-between gap-3 px-5 py-3">
+                  <div>
+                    <p className="font-medium text-sm text-gray-900">
+                      {to12h(shift.startTime)} – {to12h(shift.endTime)}
+                    </p>
+                    <p className="text-xs text-gray-500">{shift.position || shift.department || 'No position'}</p>
+                    {clockInTime && (
+                      <p className="text-xs text-green-600 mt-0.5">
+                        Clocked in: {clockInTime}
+                        {clockOutTime && ` · Out: ${clockOutTime}`}
+                      </p>
+                    )}
+                  </div>
+                  <div className="flex items-center gap-2">
+                    {!shift.clockIn && (
+                      <button
+                        onClick={() => handleClockIn(shift._id)}
+                        disabled={isBusy}
+                        className="flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium bg-green-600 hover:bg-green-700 disabled:opacity-50 text-white rounded-lg transition-colors"
+                      >
+                        {isBusy ? <span className="animate-spin rounded-full h-3 w-3 border-b-2 border-white" /> : <LogIn className="h-3.5 w-3.5" />}
+                        Clock In
+                      </button>
+                    )}
+                    {shift.clockIn && !shift.clockOut && (
+                      <button
+                        onClick={() => handleClockOut(shift._id)}
+                        disabled={isBusy}
+                        className="flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium bg-red-600 hover:bg-red-700 disabled:opacity-50 text-white rounded-lg transition-colors"
+                      >
+                        {isBusy ? <span className="animate-spin rounded-full h-3 w-3 border-b-2 border-white" /> : <LogOut className="h-3.5 w-3.5" />}
+                        Clock Out
+                      </button>
+                    )}
+                    {shift.clockIn && shift.clockOut && (
+                      <span className="text-xs font-semibold px-2.5 py-1 rounded-full bg-green-100 text-green-700">
+                        Completed
+                      </span>
+                    )}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         {/* Today's Shifts */}

@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { Calendar } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
+import { DEPARTMENTS } from '../constants/departments';
 
 const COLORS = ['#3B82F6', '#10B981', '#F59E0B', '#EF4444', '#8B5CF6', '#EC4899', '#14B8A6'];
 
@@ -99,6 +100,7 @@ export default function Register() {
                 className="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
               >
                 <option value="employee">Employee</option>
+                <option value="charge_nurse">Charge Nurse</option>
                 <option value="manager">Manager</option>
                 <option value="admin">Admin</option>
               </select>
@@ -129,6 +131,7 @@ export default function Register() {
                 <option value="L.V.N.">L.V.N.</option>
                 <option value="M.A.">M.A.</option>
                 <option value="M.D.">M.D.</option>
+                <option value="Manager">Manager</option>
                 <option value="Nurse Navigator">Nurse Navigator</option>
                 <option value="Pharmacist">Pharmacist</option>
                 <option value="Pharmacy Tech">Pharmacy Tech</option>
@@ -138,13 +141,16 @@ export default function Register() {
 
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">Department</label>
-              <input
-                type="text"
+              <select
                 value={form.department}
                 onChange={(e) => setForm({ ...form, department: e.target.value })}
                 className="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-                placeholder="e.g. ICU, Sales"
-              />
+              >
+                <option value="">Select department…</option>
+                {DEPARTMENTS.map((d) => (
+                  <option key={d} value={d}>{d}</option>
+                ))}
+              </select>
             </div>
           </div>
 

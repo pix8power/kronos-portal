@@ -3,9 +3,54 @@ const User = require('../models/User');
 const { auth, isAdmin } = require('../middleware/auth');
 
 // Get all users
+// Admins see everyone.
+// Managers see users from all departments in their departments[] array (or everyone if none set).
+// Others see only their own department.
 router.get('/', auth, async (req, res) => {
   try {
-    const users = await User.find().select('-password').sort({ name: 1 });
+    const { role, department, departments = [] } = req.user;
+    let filter = {};
+
+    if (role === 'admin') {
+      filter = {}; // all users
+    } else if (role === 'manager') {
+      if (departments.length > 0) {
+        filter = { department: { $in: departments } };
+      }
+      // if no departments configured yet, fall through with empty filter (see all)
+    } else {
+      // charge_nurse / employee — own department only
+      if (department) {
+        filter = { department };
+      } else {
+        filter = { _id: req.user._id };
+      }
+    }
+
+    const users = await User.find(filter).select('-password').sort({ name: 1 });
+    res.json(users);
+  } catch (err) {
+    res.status(500).json({ message: err.message });
+  }
+});
+
+// Search users across all departments (for messaging)
+router.get('/search', auth, async (req, res) => {
+  try {
+    const q = (req.query.q || '').trim();
+    if (!q) return res.json([]);
+    const users = await User.find({
+      _id: { $ne: req.user._id },
+      $or: [
+        { name: { $regex: q, $options: 'i' } },
+        { email: { $regex: q, $options: 'i' } },
+        { position: { $regex: q, $options: 'i' } },
+        { department: { $regex: q, $options: 'i' } },
+      ],
+    })
+      .select('-password')
+      .sort({ name: 1 })
+      .limit(20);
     res.json(users);
   } catch (err) {
     res.status(500).json({ message: err.message });
@@ -29,12 +74,10 @@ router.put('/:id', auth, async (req, res) => {
     if (req.user._id.toString() !== req.params.id && req.user.role !== 'admin') {
       return res.status(403).json({ message: 'Access denied' });
     }
-    const { name, position, department, phone, color, avatar } = req.body;
-    const user = await User.findByIdAndUpdate(
-      req.params.id,
-      { name, position, department, phone, color, avatar },
-      { new: true }
-    ).select('-password');
+    const { name, position, department, departments, phone, color, avatar } = req.body;
+    const update = { name, position, department, phone, color, avatar };
+    if (Array.isArray(departments)) update.departments = departments;
+    const user = await User.findByIdAndUpdate(req.params.id, update, { new: true }).select('-password');
     res.json(user);
   } catch (err) {
     res.status(500).json({ message: err.message });

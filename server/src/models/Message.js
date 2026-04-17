@@ -12,6 +12,7 @@ const messageSchema = new mongoose.Schema(
     type: { type: String, enum: ['text', 'image', 'file'], default: 'text' },
     readBy: [{ type: mongoose.Schema.Types.ObjectId, ref: 'User' }],
     deletedFor: [{ type: mongoose.Schema.Types.ObjectId, ref: 'User' }],
+    replyTo: { type: mongoose.Schema.Types.ObjectId, ref: 'Message', default: null },
   },
   { timestamps: true }
 );

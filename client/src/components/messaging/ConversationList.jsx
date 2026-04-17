@@ -1,8 +1,9 @@
-import { useState } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { format, isToday, isYesterday } from 'date-fns';
-import { Search, Plus, Users, MessageCircle } from 'lucide-react';
+import { Search, Plus, Users, MessageCircle, X } from 'lucide-react';
 import { useAuth } from '../../contexts/AuthContext';
 import { useSocket } from '../../contexts/SocketContext';
+import { usersAPI } from '../../services/api';
 
 const formatTime = (dateStr) => {
   if (!dateStr) return '';
@@ -11,6 +12,129 @@ const formatTime = (dateStr) => {
   if (isYesterday(d)) return 'Yesterday';
   return format(d, 'MMM d');
 };
+
+function UserAvatar({ u, size = 7, onlineUsers }) {
+  const initials = u.name.split(' ').map((n) => n[0]).join('').slice(0, 2).toUpperCase();
+  const isOnline = onlineUsers?.has(u._id) || u.isOnline;
+  return (
+    <div className="relative flex-shrink-0">
+      {u.avatar ? (
+        <img
+          src={u.avatar}
+          alt={u.name}
+          className={`w-${size} h-${size} rounded-full object-cover border border-gray-200`}
+        />
+      ) : (
+        <div
+          className={`w-${size} h-${size} rounded-full flex items-center justify-center text-white text-xs font-bold`}
+          style={{ backgroundColor: u.color || '#6B7280' }}
+        >
+          {initials}
+        </div>
+      )}
+      {isOnline && (
+        <span className="absolute -bottom-0.5 -right-0.5 w-2.5 h-2.5 bg-green-500 rounded-full border-2 border-white" />
+      )}
+    </div>
+  );
+}
+
+function UserSearchPanel({ title, onSelect, selectedIds = [], multiSelect = false, onClose }) {
+  const { user } = useAuth();
+  const { onlineUsers } = useSocket();
+  const [query, setQuery] = useState('');
+  const [results, setResults] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const debounceRef = useRef(null);
+  const inputRef = useRef(null);
+
+  useEffect(() => {
+    inputRef.current?.focus();
+  }, []);
+
+  useEffect(() => {
+    clearTimeout(debounceRef.current);
+    if (!query.trim()) {
+      setResults([]);
+      return;
+    }
+    debounceRef.current = setTimeout(async () => {
+      setLoading(true);
+      try {
+        const res = await usersAPI.search(query);
+        setResults(res.data.filter((u) => u._id !== user?._id));
+      } catch {
+        setResults([]);
+      } finally {
+        setLoading(false);
+      }
+    }, 300);
+    return () => clearTimeout(debounceRef.current);
+  }, [query, user]);
+
+  return (
+    <div className="border-b border-gray-100 bg-blue-50">
+      <div className="flex items-center justify-between px-3 pt-3 pb-1">
+        <p className="text-xs font-semibold text-gray-500 uppercase">{title}</p>
+        <button onClick={onClose} className="text-gray-400 hover:text-gray-600">
+          <X className="h-4 w-4" />
+        </button>
+      </div>
+      <div className="px-3 pb-2">
+        <div className="relative">
+          <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-gray-400" />
+          <input
+            ref={inputRef}
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            placeholder="Search by name, position, or department…"
+            className="w-full pl-8 pr-3 py-2 text-sm bg-white border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+          />
+        </div>
+      </div>
+      <div className="max-h-48 overflow-y-auto px-2 pb-2">
+        {loading && (
+          <p className="text-xs text-gray-400 text-center py-2">Searching…</p>
+        )}
+        {!loading && query && results.length === 0 && (
+          <p className="text-xs text-gray-400 text-center py-2">No users found</p>
+        )}
+        {!loading && !query && (
+          <p className="text-xs text-gray-400 text-center py-2">Type a name to search all staff</p>
+        )}
+        {results.map((u) => {
+          const isSelected = selectedIds.includes(u._id);
+          return (
+            <button
+              key={u._id}
+              onClick={() => onSelect(u)}
+              className={`w-full flex items-center gap-2.5 px-2 py-2 rounded-lg text-left hover:bg-blue-100 transition-colors ${
+                isSelected ? 'bg-blue-100' : ''
+              }`}
+            >
+              <UserAvatar u={u} size={7} onlineUsers={onlineUsers} />
+              <div className="flex-1 min-w-0">
+                <p className="text-sm font-medium text-gray-900 truncate">{u.name}</p>
+                <p className="text-xs text-gray-400 truncate">
+                  {[u.position, u.department].filter(Boolean).join(' · ') || u.role}
+                </p>
+              </div>
+              {multiSelect && (
+                <div className={`w-4 h-4 rounded border-2 flex-shrink-0 ${isSelected ? 'bg-blue-600 border-blue-600' : 'border-gray-300'}`}>
+                  {isSelected && (
+                    <svg viewBox="0 0 12 12" fill="none" className="w-full h-full">
+                      <path d="M2 6l3 3 5-5" stroke="white" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+                    </svg>
+                  )}
+                </div>
+              )}
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
 
 export default function ConversationList({
   conversations,
@@ -23,10 +147,9 @@ export default function ConversationList({
   const { user } = useAuth();
   const { onlineUsers } = useSocket();
   const [search, setSearch] = useState('');
-  const [showNewChat, setShowNewChat] = useState(false);
-  const [showGroupForm, setShowGroupForm] = useState(false);
+  const [panel, setPanel] = useState(null); // 'direct' | 'group' | null
   const [groupName, setGroupName] = useState('');
-  const [groupMembers, setGroupMembers] = useState([]);
+  const [groupMembers, setGroupMembers] = useState([]); // array of user objects
 
   const filtered = conversations.filter((c) => {
     const other = c.participants?.find((p) => p._id !== user?._id);
@@ -34,14 +157,20 @@ export default function ConversationList({
     return name.toLowerCase().includes(search.toLowerCase());
   });
 
-  const otherUsers = allUsers.filter((u) => u._id !== user?._id);
-
   const handleGroupCreate = () => {
     if (!groupName.trim() || groupMembers.length === 0) return;
-    onNewGroup(groupName, groupMembers);
-    setShowGroupForm(false);
+    onNewGroup(groupName, groupMembers.map((u) => u._id));
+    setPanel(null);
     setGroupName('');
     setGroupMembers([]);
+  };
+
+  const toggleGroupMember = (u) => {
+    setGroupMembers((prev) =>
+      prev.find((m) => m._id === u._id)
+        ? prev.filter((m) => m._id !== u._id)
+        : [...prev, u]
+    );
   };
 
   return (
@@ -52,15 +181,15 @@ export default function ConversationList({
           <h2 className="font-bold text-lg text-gray-900">Messages</h2>
           <div className="flex gap-1">
             <button
-              onClick={() => { setShowNewChat(!showNewChat); setShowGroupForm(false); }}
-              className="p-2 hover:bg-gray-100 rounded-lg text-gray-500 hover:text-blue-600"
+              onClick={() => setPanel(panel === 'direct' ? null : 'direct')}
+              className={`p-2 rounded-lg transition-colors ${panel === 'direct' ? 'bg-blue-100 text-blue-600' : 'hover:bg-gray-100 text-gray-500 hover:text-blue-600'}`}
               title="New message"
             >
               <MessageCircle className="h-4 w-4" />
             </button>
             <button
-              onClick={() => { setShowGroupForm(!showGroupForm); setShowNewChat(false); }}
-              className="p-2 hover:bg-gray-100 rounded-lg text-gray-500 hover:text-blue-600"
+              onClick={() => setPanel(panel === 'group' ? null : 'group')}
+              className={`p-2 rounded-lg transition-colors ${panel === 'group' ? 'bg-blue-100 text-blue-600' : 'hover:bg-gray-100 text-gray-500 hover:text-blue-600'}`}
               title="New group"
             >
               <Users className="h-4 w-4" />
@@ -68,7 +197,7 @@ export default function ConversationList({
           </div>
         </div>
 
-        {/* Search */}
+        {/* Search conversations */}
         <div className="relative">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
           <input
@@ -81,70 +210,60 @@ export default function ConversationList({
       </div>
 
       {/* New direct message panel */}
-      {showNewChat && (
-        <div className="border-b border-gray-100 p-2 bg-blue-50 max-h-48 overflow-y-auto">
-          <p className="text-xs font-semibold text-gray-500 uppercase px-2 mb-1">Start New Chat</p>
-          {otherUsers.map((u) => (
-            <button
-              key={u._id}
-              onClick={() => { onNewDirect(u._id); setShowNewChat(false); }}
-              className="w-full flex items-center gap-2 px-2 py-1.5 hover:bg-blue-100 rounded-lg text-left"
-            >
-              <div className="relative">
-                <div
-                  className="w-7 h-7 rounded-full flex items-center justify-center text-white text-xs font-bold"
-                  style={{ backgroundColor: u.color }}
-                >
-                  {u.name.split(' ').map((n) => n[0]).join('').slice(0, 2)}
-                </div>
-                {(onlineUsers.has(u._id) || u.isOnline) && (
-                  <span className="absolute -bottom-0.5 -right-0.5 w-2 h-2 bg-green-500 rounded-full border border-white" />
-                )}
-              </div>
-              <div>
-                <p className="text-sm font-medium text-gray-900">{u.name}</p>
-                <p className="text-xs text-gray-500">{u.position || u.role}</p>
-              </div>
-            </button>
-          ))}
-        </div>
+      {panel === 'direct' && (
+        <UserSearchPanel
+          title="New Message"
+          onSelect={(u) => { onNewDirect(u._id); setPanel(null); }}
+          onClose={() => setPanel(null)}
+        />
       )}
 
       {/* New group panel */}
-      {showGroupForm && (
-        <div className="border-b border-gray-100 p-3 bg-green-50">
-          <p className="text-xs font-semibold text-gray-500 uppercase mb-2">New Group</p>
-          <input
-            value={groupName}
-            onChange={(e) => setGroupName(e.target.value)}
-            placeholder="Group name..."
-            className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg mb-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
-          />
-          <div className="max-h-32 overflow-y-auto space-y-1 mb-2">
-            {otherUsers.map((u) => (
-              <label key={u._id} className="flex items-center gap-2 cursor-pointer">
-                <input
-                  type="checkbox"
-                  checked={groupMembers.includes(u._id)}
-                  onChange={(e) =>
-                    setGroupMembers(
-                      e.target.checked
-                        ? [...groupMembers, u._id]
-                        : groupMembers.filter((id) => id !== u._id)
-                    )
-                  }
-                  className="rounded"
-                />
-                <span className="text-sm text-gray-900">{u.name}</span>
-              </label>
-            ))}
+      {panel === 'group' && (
+        <div className="border-b border-gray-100 bg-green-50">
+          <div className="flex items-center justify-between px-3 pt-3 pb-1">
+            <p className="text-xs font-semibold text-gray-500 uppercase">New Group</p>
+            <button onClick={() => { setPanel(null); setGroupName(''); setGroupMembers([]); }} className="text-gray-400 hover:text-gray-600">
+              <X className="h-4 w-4" />
+            </button>
           </div>
-          <button
-            onClick={handleGroupCreate}
-            className="w-full bg-blue-600 text-white text-sm py-1.5 rounded-lg hover:bg-blue-700"
-          >
-            Create Group
-          </button>
+          <div className="px-3 pb-3 space-y-2">
+            <input
+              value={groupName}
+              onChange={(e) => setGroupName(e.target.value)}
+              placeholder="Group name…"
+              className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+            />
+
+            {/* Selected members chips */}
+            {groupMembers.length > 0 && (
+              <div className="flex flex-wrap gap-1">
+                {groupMembers.map((m) => (
+                  <span key={m._id} className="inline-flex items-center gap-1 bg-blue-100 text-blue-800 text-xs px-2 py-0.5 rounded-full">
+                    {m.name.split(' ')[0]}
+                    <button onClick={() => toggleGroupMember(m)} className="hover:text-blue-600">
+                      <X className="h-3 w-3" />
+                    </button>
+                  </span>
+                ))}
+              </div>
+            )}
+
+            {/* Inline user search for group */}
+            <GroupMemberSearch
+              selectedIds={groupMembers.map((m) => m._id)}
+              onToggle={toggleGroupMember}
+              currentUserId={user?._id}
+            />
+
+            <button
+              onClick={handleGroupCreate}
+              disabled={!groupName.trim() || groupMembers.length === 0}
+              className="w-full bg-blue-600 text-white text-sm py-1.5 rounded-lg hover:bg-blue-700 disabled:opacity-40"
+            >
+              Create Group ({groupMembers.length} member{groupMembers.length !== 1 ? 's' : ''})
+            </button>
+          </div>
         </div>
       )}
 
@@ -172,12 +291,20 @@ export default function ConversationList({
                 }`}
               >
                 <div className="relative flex-shrink-0">
-                  <div
-                    className="w-11 h-11 rounded-full flex items-center justify-center text-white text-sm font-bold"
-                    style={{ backgroundColor: conv.isGroup ? '#6B7280' : other?.color || '#6B7280' }}
-                  >
-                    {conv.isGroup ? <Users className="h-5 w-5" /> : initials}
-                  </div>
+                  {!conv.isGroup && other?.avatar ? (
+                    <img
+                      src={other.avatar}
+                      alt={name}
+                      className="w-11 h-11 rounded-full object-cover border border-gray-200"
+                    />
+                  ) : (
+                    <div
+                      className="w-11 h-11 rounded-full flex items-center justify-center text-white text-sm font-bold"
+                      style={{ backgroundColor: conv.isGroup ? '#6B7280' : other?.color || '#6B7280' }}
+                    >
+                      {conv.isGroup ? <Users className="h-5 w-5" /> : initials}
+                    </div>
+                  )}
                   {isOnline && (
                     <span className="absolute bottom-0 right-0 w-3 h-3 bg-green-500 rounded-full border-2 border-white" />
                   )}
@@ -200,6 +327,83 @@ export default function ConversationList({
           })
         )}
       </div>
+    </div>
+  );
+}
+
+// Separate component for the group member search to keep state isolated
+function GroupMemberSearch({ selectedIds, onToggle, currentUserId }) {
+  const { onlineUsers } = useSocket();
+  const [query, setQuery] = useState('');
+  const [results, setResults] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const debounceRef = useRef(null);
+
+  useEffect(() => {
+    clearTimeout(debounceRef.current);
+    if (!query.trim()) { setResults([]); return; }
+    debounceRef.current = setTimeout(async () => {
+      setLoading(true);
+      try {
+        const res = await usersAPI.search(query);
+        setResults(res.data.filter((u) => u._id !== currentUserId));
+      } catch {
+        setResults([]);
+      } finally {
+        setLoading(false);
+      }
+    }, 300);
+    return () => clearTimeout(debounceRef.current);
+  }, [query, currentUserId]);
+
+  return (
+    <div>
+      <div className="relative mb-1">
+        <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-gray-400" />
+        <input
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          placeholder="Search staff to add…"
+          className="w-full pl-8 pr-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white"
+        />
+      </div>
+      {(results.length > 0 || loading || query) && (
+        <div className="max-h-32 overflow-y-auto border border-gray-200 rounded-lg bg-white">
+          {loading && <p className="text-xs text-gray-400 text-center py-2">Searching…</p>}
+          {!loading && query && results.length === 0 && (
+            <p className="text-xs text-gray-400 text-center py-2">No users found</p>
+          )}
+          {results.map((u) => {
+            const isSelected = selectedIds.includes(u._id);
+            return (
+              <button
+                key={u._id}
+                type="button"
+                onClick={() => onToggle(u)}
+                className={`w-full flex items-center gap-2 px-2 py-1.5 text-left hover:bg-gray-50 ${isSelected ? 'bg-blue-50' : ''}`}
+              >
+                <div
+                  className="w-6 h-6 rounded-full flex items-center justify-center text-white text-[10px] font-bold flex-shrink-0"
+                  style={{ backgroundColor: u.color || '#6B7280' }}
+                >
+                  {u.name.split(' ').map((n) => n[0]).join('').slice(0, 2)}
+                </div>
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm text-gray-900 truncate">{u.name}</p>
+                  <p className="text-xs text-gray-400 truncate">{u.department || u.position || ''}</p>
+                </div>
+                <div className={`w-4 h-4 rounded border-2 flex-shrink-0 ${isSelected ? 'bg-blue-600 border-blue-600' : 'border-gray-300'}`}>
+                  {isSelected && (
+                    <svg viewBox="0 0 12 12" fill="none" className="w-full h-full">
+                      <path d="M2 6l3 3 5-5" stroke="white" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+                    </svg>
+                  )}
+                </div>
+              </button>
+            );
+          })}
+        </div>
+      )}
     </div>
   );
 }

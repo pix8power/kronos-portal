@@ -47,7 +47,7 @@ const initSocket = (io) => {
     // Send message via socket
     socket.on('sendMessage', async (data) => {
       try {
-        const { conversationId, content, type } = data;
+        const { conversationId, content, type, replyTo } = data;
 
         // Verify user is in conversation
         const conversation = await Conversation.findOne({
@@ -62,16 +62,22 @@ const initSocket = (io) => {
           content: encrypt(content),
           type: type || 'text',
           readBy: [userId],
+          ...(replyTo ? { replyTo } : {}),
         });
 
         await Conversation.findByIdAndUpdate(conversationId, {
           lastMessage: message._id,
         });
 
-        const populated = await message.populate('sender', 'name email avatar color');
+        await message.populate('sender', 'name email avatar color');
+        await message.populate({ path: 'replyTo', populate: { path: 'sender', select: 'name color' } });
 
-        // Decrypt before sending to clients
-        const decrypted = { ...populated.toObject(), content: decrypt(populated.content) };
+        const obj = message.toObject();
+        obj.content = decrypt(obj.content);
+        if (obj.replyTo && obj.replyTo.content) {
+          obj.replyTo = { ...obj.replyTo, content: decrypt(obj.replyTo.content) };
+        }
+        const decrypted = obj;
 
         io.to(`conv:${conversationId}`).emit('newMessage', {
           conversationId,

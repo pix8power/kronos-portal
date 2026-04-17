@@ -15,6 +15,8 @@ const shiftSchema = new mongoose.Schema(
       default: 'scheduled',
     },
     createdBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
+    clockIn: { type: Date },
+    clockOut: { type: Date },
   },
   { timestamps: true }
 );

@@ -89,6 +89,7 @@ router.get('/conversations/:id/messages', auth, async (req, res) => {
       deletedFor: { $ne: req.user._id },
     })
       .populate('sender', 'name email avatar color')
+      .populate({ path: 'replyTo', populate: { path: 'sender', select: 'name color' } })
       .sort({ createdAt: -1 })
       .skip((page - 1) * limit)
       .limit(Number(limit));
@@ -99,7 +100,13 @@ router.get('/conversations/:id/messages', auth, async (req, res) => {
       { $addToSet: { readBy: req.user._id } }
     );
 
-    res.json(messages.reverse().map(decryptMessage));
+    res.json(messages.reverse().map((msg) => {
+      const obj = decryptMessage(msg);
+      if (obj.replyTo && obj.replyTo.content) {
+        obj.replyTo = { ...obj.replyTo, content: decrypt(obj.replyTo.content) };
+      }
+      return obj;
+    }));
   } catch (err) {
     res.status(500).json({ message: err.message });
   }
@@ -108,19 +115,25 @@ router.get('/conversations/:id/messages', auth, async (req, res) => {
 // Send a message
 router.post('/conversations/:id/messages', auth, async (req, res) => {
   try {
-    const { content, type } = req.body;
+    const { content, type, replyTo } = req.body;
     const message = await Message.create({
       conversation: req.params.id,
       sender: req.user._id,
       content: encrypt(content),
       type: type || 'text',
       readBy: [req.user._id],
+      ...(replyTo ? { replyTo } : {}),
     });
 
     await Conversation.findByIdAndUpdate(req.params.id, { lastMessage: message._id });
 
-    const populated = await message.populate('sender', 'name email avatar color');
-    res.status(201).json(decryptMessage(populated));
+    await message.populate('sender', 'name email avatar color');
+    await message.populate({ path: 'replyTo', populate: { path: 'sender', select: 'name color' } });
+    const obj = decryptMessage(message);
+    if (obj.replyTo && obj.replyTo.content) {
+      obj.replyTo = { ...obj.replyTo, content: decrypt(obj.replyTo.content) };
+    }
+    res.status(201).json(obj);
   } catch (err) {
     res.status(500).json({ message: err.message });
   }

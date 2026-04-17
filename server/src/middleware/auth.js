@@ -24,4 +24,12 @@ const isAdmin = (req, res, next) => {
   next();
 };
 
-module.exports = { auth, isAdmin };
+const canManageMasterSchedule = (req, res, next) => {
+  const allowed = ['admin', 'manager', 'charge_nurse'];
+  if (!allowed.includes(req.user.role)) {
+    return res.status(403).json({ message: 'Access denied' });
+  }
+  next();
+};
+
+module.exports = { auth, isAdmin, canManageMasterSchedule };
