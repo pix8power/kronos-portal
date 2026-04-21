@@ -19,6 +19,22 @@ const userSchema = new mongoose.Schema(
     lockUntil: { type: Date },
     resetPasswordToken: { type: String },
     resetPasswordExpires: { type: Date },
+    // Profile extras
+    hireDate:   { type: String, default: '' },
+    bio:        { type: String, default: '' },
+    licenseNumber: { type: String, default: '' },
+    licenseExpiry:  { type: String, default: '' },
+    blsCprExpiry:   { type: String, default: '' },
+    certifications: [{
+      name:   { type: String },
+      number: { type: String, default: '' },
+      expiry: { type: String },
+    }],
+    documents: [{
+      name:       { type: String },
+      filename:   { type: String },
+      uploadedAt: { type: Date, default: Date.now },
+    }],
   },
   { timestamps: true }
 );

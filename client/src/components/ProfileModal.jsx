@@ -95,8 +95,7 @@ export default function ProfileModal({ onClose }) {
     try {
       const res = await usersAPI.update(user._id, form);
       updateUser(res.data);
-      setSuccess(true);
-      setTimeout(() => setSuccess(false), 2500);
+      onClose();
     } catch (err) {
       setError(err.response?.data?.message || 'Failed to save changes.');
     } finally {

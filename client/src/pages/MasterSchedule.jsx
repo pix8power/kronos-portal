@@ -5,9 +5,6 @@ import {
   Plus,
   Trash2,
   RefreshCw,
-  Save,
-  ChevronDown,
-  ChevronUp,
   AlertCircle,
   CheckCircle,
 } from 'lucide-react';
@@ -27,7 +24,7 @@ function getNearestSunday(date = new Date()) {
 const ROLE_CAN_MANAGE = ['admin', 'manager', 'charge_nurse'];
 
 export default function MasterSchedule() {
-  const { user } = useAuth();
+  const { user, activeDepartment } = useAuth();
   const [schedule, setSchedule] = useState(null);
   const [users, setUsers] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -42,6 +39,11 @@ export default function MasterSchedule() {
   const [addForm, setAddForm] = useState(null); // { week, dayOfWeek } or null
 
   const canManage = ROLE_CAN_MANAGE.includes(user?.role);
+
+  // Filter users to the active department (if one is selected)
+  const deptUsers = activeDepartment
+    ? users.filter((u) => u.department === activeDepartment || (u.departments || []).includes(activeDepartment))
+    : users;
 
   const loadData = useCallback(async () => {
     setLoading(true);
@@ -127,10 +129,16 @@ export default function MasterSchedule() {
     }
   }
 
-  // Group entries by week + dayOfWeek
+  // Group entries by week + dayOfWeek, filtered to active department
   function getEntriesFor(week, dayOfWeek) {
     if (!schedule?.entries) return [];
-    return schedule.entries.filter((e) => e.week === week && e.dayOfWeek === dayOfWeek);
+    return schedule.entries.filter((e) => {
+      if (e.week !== week || e.dayOfWeek !== dayOfWeek) return false;
+      if (!activeDepartment) return true;
+      const emp = e.employee;
+      if (!emp) return true;
+      return emp.department === activeDepartment || (emp.departments || []).includes(activeDepartment);
+    });
   }
 
   if (loading) {
@@ -149,7 +157,10 @@ export default function MasterSchedule() {
           <CalendarRange className="h-7 w-7 text-blue-600" />
           <div>
             <h1 className="text-2xl font-bold text-gray-900">Master Schedule</h1>
-            <p className="text-sm text-gray-500">2-week rotating template that applies to staff's annual schedule</p>
+            <p className="text-sm text-gray-500">
+              2-week rotating template that applies to staff's annual schedule
+              {activeDepartment && <span className="ml-2 font-semibold text-blue-600">· {activeDepartment}</span>}
+            </p>
           </div>
         </div>
         {canManage && schedule && (
@@ -234,57 +245,16 @@ export default function MasterSchedule() {
 
           {/* Week grids */}
           {[1, 2].map((week) => (
-            <div key={week} className="mb-6 bg-white rounded-xl border border-gray-200 overflow-hidden">
-              <div className="bg-blue-600 text-white px-4 py-3">
-                <h2 className="font-semibold text-base">Week {week}</h2>
-              </div>
-              <div className="overflow-x-auto">
-                <table className="w-full border-collapse min-w-[700px]">
-                  <thead>
-                    <tr className="bg-gray-50 border-b border-gray-200">
-                      {DAY_NAMES.map((d, i) => (
-                        <th key={i} className="px-3 py-2 text-xs font-semibold text-gray-600 text-center border-r border-gray-200 last:border-r-0 w-[14.28%]">
-                          {d}
-                        </th>
-                      ))}
-                    </tr>
-                  </thead>
-                  <tbody>
-                    <tr>
-                      {DAY_NAMES.map((_, dayOfWeek) => {
-                        const entries = getEntriesFor(week, dayOfWeek);
-                        return (
-                          <td
-                            key={dayOfWeek}
-                            className="border-r border-gray-200 last:border-r-0 p-2 align-top min-h-[120px]"
-                          >
-                            <div className="space-y-1 min-h-[80px]">
-                              {entries.map((entry) => (
-                                <ShiftChip
-                                  key={entry._id}
-                                  entry={entry}
-                                  canManage={canManage}
-                                  onRemove={() => handleRemoveEntry(entry._id)}
-                                />
-                              ))}
-                            </div>
-                            {canManage && (
-                              <button
-                                onClick={() => setAddForm({ week, dayOfWeek })}
-                                className="mt-1 w-full text-xs text-blue-500 hover:text-blue-700 hover:bg-blue-50 rounded py-1 flex items-center justify-center gap-1 border border-dashed border-blue-200 hover:border-blue-400 transition-colors"
-                              >
-                                <Plus className="h-3 w-3" />
-                                Add
-                              </button>
-                            )}
-                          </td>
-                        );
-                      })}
-                    </tr>
-                  </tbody>
-                </table>
-              </div>
-            </div>
+            <WeekStaffGrid
+              key={week}
+              week={week}
+              users={deptUsers}
+              entries={schedule.entries || []}
+              canManage={canManage}
+              activeDepartment={activeDepartment}
+              onAdd={(dayOfWeek) => setAddForm({ week, dayOfWeek })}
+              onRemove={handleRemoveEntry}
+            />
           ))}
         </>
       )}
@@ -294,7 +264,7 @@ export default function MasterSchedule() {
         <AddEntryModal
           week={addForm.week}
           dayOfWeek={addForm.dayOfWeek}
-          users={users}
+          users={deptUsers}
           onAdd={handleAddEntry}
           onClose={() => setAddForm(null)}
         />
@@ -362,28 +332,168 @@ export default function MasterSchedule() {
   );
 }
 
-function ShiftChip({ entry, canManage, onRemove }) {
-  const emp = entry.employee;
-  const name = emp?.name || 'Unknown';
-  const color = emp?.color || '#3B82F6';
+const MANAGER_ROLES_MS = ['admin', 'manager', 'charge_nurse'];
+const MANAGER_POSITIONS_MS = ['Manager', 'Charge Nurse', 'Supervisor', 'Director'];
+
+function WeekStaffGrid({ week, users, entries, canManage, onAdd, onRemove }) {
+  const employees = users.filter((u) => u.role !== 'admin' || users.length <= 3);
+
+  const positionGroups = [...employees]
+    .sort((a, b) => {
+      const aM = MANAGER_ROLES_MS.includes(a.role);
+      const bM = MANAGER_ROLES_MS.includes(b.role);
+      if (aM !== bM) return aM ? -1 : 1;
+      return a.name.localeCompare(b.name);
+    })
+    .reduce((acc, emp) => {
+      const pos = emp.position || 'Unassigned';
+      if (!acc[pos]) acc[pos] = [];
+      acc[pos].push(emp);
+      return acc;
+    }, {});
+
+  const sortedPositions = Object.keys(positionGroups).sort((a, b) => {
+    const aM = MANAGER_POSITIONS_MS.includes(a);
+    const bM = MANAGER_POSITIONS_MS.includes(b);
+    if (aM !== bM) return aM ? -1 : 1;
+    return a.localeCompare(b);
+  });
+
+  const getEntriesFor = (empId, dayOfWeek) =>
+    entries.filter((e) => e.week === week && e.dayOfWeek === dayOfWeek && (e.employee?._id || e.employee) === empId);
+
+  const countWorking = (posEmps, dayOfWeek) =>
+    posEmps.filter((emp) => getEntriesFor(emp._id, dayOfWeek).length > 0).length;
+
+  const empHoursInWeek = (emp) =>
+    entries
+      .filter((e) => e.week === week && (e.employee?._id || e.employee) === emp._id)
+      .reduce((acc, e) => {
+        const [sh, sm] = e.startTime.split(':').map(Number);
+        const [eh, em] = e.endTime.split(':').map(Number);
+        return acc + (eh * 60 + em - (sh * 60 + sm)) / 60;
+      }, 0);
+
+  const STAFF_COL = 140;
+  const DAY_COL = 120;
+  const totalW = STAFF_COL + 7 * DAY_COL;
+  const gridTemplate = `${STAFF_COL}px repeat(7, ${DAY_COL}px)`;
+
+  return (
+    <div className="mb-6 bg-white rounded-xl border border-gray-200 overflow-hidden">
+      <div className="bg-blue-600 text-white px-4 py-3">
+        <h2 className="font-semibold text-base">Week {week}</h2>
+      </div>
+      <div className="overflow-x-auto">
+        <div style={{ minWidth: `${totalW}px` }}>
+
+          {/* Header row */}
+          <div className="grid border-b border-gray-200 sticky top-0 z-10 bg-gray-50" style={{ gridTemplateColumns: gridTemplate }}>
+            <div className="p-2 border-r border-gray-200 text-xs font-semibold text-gray-500 uppercase sticky left-0 z-20 bg-gray-50">Staff</div>
+            {DAY_NAMES.map((d, i) => (
+              <div key={i} className="text-center border-r border-gray-100 last:border-r-0 py-2 px-1">
+                <p className="text-xs font-semibold text-gray-600">{d}</p>
+              </div>
+            ))}
+          </div>
+
+          {/* Position groups */}
+          {employees.length === 0 ? (
+            <div className="text-center py-12 text-gray-400 text-sm">No staff found</div>
+          ) : (
+            sortedPositions.map((position) => {
+              const posEmps = positionGroups[position];
+              return (
+                <div key={position}>
+                  {/* Position header */}
+                  <div className="grid bg-gray-100 border-b border-gray-200" style={{ gridTemplateColumns: gridTemplate }}>
+                    <div className="px-2 py-1.5 border-r border-gray-200 flex items-center gap-1.5 sticky left-0 z-10 bg-gray-100">
+                      <span className="text-xs font-bold text-gray-700 uppercase tracking-wide truncate">{position}</span>
+                      <span className="text-xs bg-blue-100 text-blue-700 font-semibold px-1 py-0.5 rounded-full flex-shrink-0">{posEmps.length}</span>
+                    </div>
+                    {DAY_NAMES.map((_, i) => {
+                      const working = countWorking(posEmps, i);
+                      return (
+                        <div key={i} className="border-r border-gray-200 last:border-r-0 flex items-center justify-center py-1">
+                          {working > 0 && (
+                            <span className="text-[9px] font-semibold text-green-700 bg-green-100 px-1 py-0.5 rounded-full">{working}</span>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+
+                  {/* Employee rows */}
+                  {posEmps.map((emp) => (
+                    <div key={emp._id} className="grid border-b border-gray-100 last:border-b-0 hover:bg-gray-50/30 transition-colors" style={{ gridTemplateColumns: gridTemplate }}>
+                      {/* Staff name cell */}
+                      <div className="p-2 border-r border-gray-200 flex items-center gap-1.5 sticky left-0 z-10 bg-white">
+                        <div className="w-6 h-6 rounded-full flex items-center justify-center text-white text-[9px] font-bold flex-shrink-0" style={{ backgroundColor: emp.color || '#3B82F6' }}>
+                          {emp.name.split(' ').map((n) => n[0]).join('').slice(0, 2)}
+                        </div>
+                        <div className="min-w-0 flex-1">
+                          <p className="text-xs font-medium text-gray-900 truncate">{emp.name}</p>
+                          <p className="text-[9px] text-blue-600">{empHoursInWeek(emp).toFixed(0)}h</p>
+                        </div>
+                      </div>
+
+                      {/* Day cells */}
+                      {DAY_NAMES.map((_, dayOfWeek) => {
+                        const cellEntries = getEntriesFor(emp._id, dayOfWeek);
+                        return (
+                          <div key={dayOfWeek} className="border-r border-gray-100 last:border-r-0 p-1 align-top min-h-[52px]">
+                            <div className="space-y-0.5">
+                              {cellEntries.map((entry) => (
+                                <ShiftChip
+                                  key={entry._id}
+                                  entry={entry}
+                                  canManage={canManage}
+                                  onRemove={() => onRemove(entry._id)}
+                                  empColor={emp.color}
+                                />
+                              ))}
+                            </div>
+                            {canManage && (
+                              <button
+                                onClick={() => onAdd(dayOfWeek)}
+                                className="mt-0.5 w-full text-[9px] text-blue-400 hover:text-blue-600 hover:bg-blue-50 rounded py-0.5 flex items-center justify-center gap-0.5 border border-dashed border-blue-100 hover:border-blue-300 transition-colors"
+                              >
+                                <Plus className="h-2.5 w-2.5" />
+                                Add
+                              </button>
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  ))}
+                </div>
+              );
+            })
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function ShiftChip({ entry, canManage, onRemove, empColor }) {
+  const color = empColor || entry.employee?.color || '#3B82F6';
 
   return (
     <div
-      className="relative group flex items-start gap-1.5 p-1.5 rounded-md text-xs text-white"
-      style={{ backgroundColor: color }}
+      className="relative group text-[9px] px-1 py-0.5 rounded truncate leading-tight border"
+      style={{ backgroundColor: color + '25', borderColor: color + '80', color }}
+      title={`${entry.startTime}–${entry.endTime}${entry.position ? ` · ${entry.position}` : ''}`}
     >
-      <div className="flex-1 min-w-0">
-        <p className="font-semibold truncate">{name}</p>
-        <p className="opacity-90">{entry.startTime} – {entry.endTime}</p>
-        {entry.position && <p className="opacity-75 truncate">{entry.position}</p>}
-      </div>
+      <span className="font-semibold">{entry.startTime}–{entry.endTime}</span>
       {canManage && (
         <button
           onClick={onRemove}
-          className="opacity-0 group-hover:opacity-100 transition-opacity p-0.5 hover:bg-black/20 rounded"
+          className="opacity-0 group-hover:opacity-100 transition-opacity absolute right-0.5 top-0.5"
           title="Remove"
         >
-          <Trash2 className="h-3 w-3" />
+          <Trash2 className="h-2.5 w-2.5" />
         </button>
       )}
     </div>

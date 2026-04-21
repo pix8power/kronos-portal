@@ -1,9 +1,11 @@
 const router = require('express').Router();
 const TimeCorrection = require('../models/TimeCorrection');
+const Shift = require('../models/Shift');
 const User = require('../models/User');
 const Conversation = require('../models/Conversation');
 const Message = require('../models/Message');
 const { auth } = require('../middleware/auth');
+const { sendPush } = require('../utils/sendPush');
 
 // Convert HH:MM (24h) → h:MM AM/PM
 const to12h = (t) => {
@@ -104,6 +106,13 @@ router.post('/', auth, async (req, res) => {
             message: populatedMsg,
           });
         }
+        sendPush(manager._id.toString(), {
+          title: `Time Correction from ${req.user.name}`,
+          body: 'A new time correction request was submitted.',
+          icon: '/icon-192.png',
+          badge: '/icon-192.png',
+          data: { url: '/time-corrections' },
+        }).catch(() => {});
       }
     } catch (notifyErr) {
       console.error('Manager notification error:', notifyErr.message);
@@ -137,12 +146,41 @@ router.patch('/:id', auth, async (req, res) => {
       { status, reviewNote, reviewedBy: req.user._id },
       { new: true }
     )
-      .populate('employee', 'name email color position')
+      .populate('employee', 'name email color position department')
       .populate('reviewedBy', 'name');
 
     if (!request) return res.status(404).json({ message: 'Request not found' });
 
-    console.log(`[TimeCorrectionReview] ${name} (${role}) ${status} request ${req.params.id}`);
+    if (status === 'approved') {
+      const correctionNote = `Time correction – approved by ${req.user.name}`;
+      for (const entry of request.entries) {
+        if (!entry.date) continue;
+        const hasIn  = !!entry.clockIn;
+        const hasOut = !!entry.clockOut;
+        if (!hasIn && !hasOut) continue;
+
+        const existing = await Shift.findOne({ employee: request.employee._id, date: entry.date });
+        if (existing) {
+          const upd = { status: 'confirmed', notes: correctionNote };
+          if (hasIn)  upd.startTime = entry.clockIn;
+          if (hasOut) upd.endTime   = entry.clockOut;
+          await existing.updateOne({ $set: upd });
+        } else if (hasIn && hasOut) {
+          await Shift.create({
+            employee:   request.employee._id,
+            date:       entry.date,
+            startTime:  entry.clockIn,
+            endTime:    entry.clockOut,
+            position:   request.employee.position  || '',
+            department: request.employee.department || '',
+            notes:      correctionNote,
+            status:     'confirmed',
+            createdBy:  req.user._id,
+          });
+        }
+      }
+    }
+
     res.json(request);
   } catch (err) {
     res.status(500).json({ message: err.message });

@@ -71,7 +71,9 @@ router.get('/:id', auth, async (req, res) => {
 // Update user profile
 router.put('/:id', auth, async (req, res) => {
   try {
-    if (req.user._id.toString() !== req.params.id && req.user.role !== 'admin') {
+    const isSelf = req.user._id.toString() === req.params.id;
+    const isPrivileged = ['admin', 'manager'].includes(req.user.role);
+    if (!isSelf && !isPrivileged) {
       return res.status(403).json({ message: 'Access denied' });
     }
     const { name, position, department, departments, phone, color, avatar } = req.body;

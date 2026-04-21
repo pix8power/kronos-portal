@@ -7,6 +7,7 @@
     "start": "concurrently \"cd server && npm start\" \"cd client && npm run preview\""
   },
   "devDependencies": {
+    "autocannon": "^8.0.0",
     "concurrently": "^8.2.0"
   }
 }

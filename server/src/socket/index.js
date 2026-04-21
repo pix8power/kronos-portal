@@ -3,6 +3,7 @@ const User = require('../models/User');
 const Message = require('../models/Message');
 const Conversation = require('../models/Conversation');
 const { encrypt, decrypt } = require('../utils/crypto');
+const { sendPush } = require('../utils/sendPush');
 
 const onlineUsers = new Map(); // userId -> socketId
 
@@ -88,10 +89,19 @@ const initSocket = (io) => {
         conversation.participants.forEach((participantId) => {
           const pid = participantId.toString();
           if (pid !== userId) {
+            console.log(`[socket] emitting messageNotification to room="${pid}"`);
             io.to(pid).emit('messageNotification', {
               conversationId,
               message: decrypted,
             });
+            // Web push for lock-screen / background notification
+            sendPush(pid, {
+              title: `New message from ${socket.user.name}`,
+              body: decrypted.content?.slice(0, 100) || 'New message',
+              icon: '/icon-192.png',
+              badge: '/icon-192.png',
+              data: { url: '/messages', conversationId },
+            }).catch(() => {});
           }
         });
       } catch (err) {

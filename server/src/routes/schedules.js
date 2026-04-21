@@ -7,6 +7,8 @@ const RecurringUnavailability = require('../models/RecurringUnavailability');
 const { auth, isAdmin } = require('../middleware/auth');
 const { audit } = require('../utils/audit');
 const { notify } = require('../utils/notify');
+const { sendPush } = require('../utils/sendPush');
+const User = require('../models/User');
 
 // Helper: check for shift conflicts for an employee on a date
 async function getConflict(employeeId, date, startTime, endTime, excludeId) {
@@ -94,6 +96,13 @@ router.post('/shifts', auth, isAdmin, async (req, res) => {
       link: '/schedule',
       data: { shiftId: shift._id },
     });
+    sendPush(employee.toString(), {
+      title: 'New Shift Assigned',
+      body: `You have been scheduled on ${date} from ${startTime} to ${endTime}.`,
+      icon: '/icon-192.png',
+      badge: '/icon-192.png',
+      data: { url: '/schedule' },
+    }).catch(() => {});
 
     res.status(201).json(populated);
   } catch (err) {
@@ -125,6 +134,13 @@ router.post('/shifts/bulk', auth, isAdmin, async (req, res) => {
         link: '/schedule',
         data: { shiftId: shift._id },
       });
+      sendPush(s.employee.toString(), {
+        title: 'New Shift Assigned',
+        body: `You have been scheduled on ${s.date} from ${s.startTime} to ${s.endTime}.`,
+        icon: '/icon-192.png',
+        badge: '/icon-192.png',
+        data: { url: '/schedule' },
+      }).catch(() => {});
     }
     await audit(req, 'bulk_create_shifts', 'Shift', null, { count: created.length, skipped: skipped.length });
     res.status(201).json({ created, skipped });
@@ -150,6 +166,19 @@ router.put('/shifts/:id', auth, isAdmin, async (req, res) => {
     const shift = await Shift.findByIdAndUpdate(req.params.id, { date, startTime, endTime, position, department, notes, status }, { new: true })
       .populate('employee', 'name email color position department avatar');
     await audit(req, 'update_shift', 'Shift', shift._id, { date, startTime, endTime, status });
+
+    const empId = (shift.employee?._id || shift.employee).toString();
+    const newDate = date || existing.date;
+    const newStart = startTime || existing.startTime;
+    const newEnd = endTime || existing.endTime;
+    sendPush(empId, {
+      title: 'Shift Updated',
+      body: `Your shift on ${newDate} has been updated to ${newStart}–${newEnd}.`,
+      icon: '/icon-192.png',
+      badge: '/icon-192.png',
+      data: { url: '/schedule' },
+    }).catch(() => {});
+
     res.json(shift);
   } catch (err) {
     res.status(500).json({ message: err.message });
@@ -170,40 +199,14 @@ router.delete('/shifts/:id', auth, isAdmin, async (req, res) => {
       body: `Your shift on ${shift.date} (${shift.startTime}–${shift.endTime}) has been removed.`,
       link: '/schedule',
     });
+    sendPush(shift.employee._id.toString(), {
+      title: 'Shift Removed',
+      body: `Your shift on ${shift.date} (${shift.startTime}–${shift.endTime}) has been removed.`,
+      icon: '/icon-192.png',
+      badge: '/icon-192.png',
+      data: { url: '/schedule' },
+    }).catch(() => {});
     res.json({ message: 'Shift deleted' });
-  } catch (err) {
-    res.status(500).json({ message: err.message });
-  }
-});
-
-// Clock in
-router.patch('/shifts/:id/clock-in', auth, async (req, res) => {
-  try {
-    const shift = await Shift.findOne({ _id: req.params.id, employee: req.user._id });
-    if (!shift) return res.status(404).json({ message: 'Shift not found' });
-    if (shift.clockIn) return res.status(400).json({ message: 'Already clocked in' });
-    shift.clockIn = new Date();
-    shift.status = 'confirmed';
-    await shift.save();
-    await audit(req, 'clock_in', 'Shift', shift._id, { time: shift.clockIn });
-    res.json(shift);
-  } catch (err) {
-    res.status(500).json({ message: err.message });
-  }
-});
-
-// Clock out
-router.patch('/shifts/:id/clock-out', auth, async (req, res) => {
-  try {
-    const shift = await Shift.findOne({ _id: req.params.id, employee: req.user._id });
-    if (!shift) return res.status(404).json({ message: 'Shift not found' });
-    if (!shift.clockIn) return res.status(400).json({ message: 'Not clocked in yet' });
-    if (shift.clockOut) return res.status(400).json({ message: 'Already clocked out' });
-    shift.clockOut = new Date();
-    shift.status = 'completed';
-    await shift.save();
-    await audit(req, 'clock_out', 'Shift', shift._id, { time: shift.clockOut });
-    res.json(shift);
   } catch (err) {
     res.status(500).json({ message: err.message });
   }
@@ -213,8 +216,9 @@ router.patch('/shifts/:id/clock-out', auth, async (req, res) => {
 
 router.get('/timeoff', auth, async (req, res) => {
   try {
-    const query = req.user.role === 'employee' ? { employee: req.user._id } : {};
     const { status, startDate, endDate } = req.query;
+    const isEmployee = req.user.role === 'employee';
+    const query = (isEmployee && status !== 'approved') ? { employee: req.user._id } : {};
     if (status) query.status = status;
     if (startDate && endDate) { query.startDate = { $lte: endDate }; query.endDate = { $gte: startDate }; }
     const requests = await TimeOffRequest.find(query)
@@ -389,6 +393,25 @@ router.post('/exchanges', auth, async (req, res) => {
     if (existing) return res.status(409).json({ message: 'An open exchange request already exists for this shift' });
     const exchange = await ShiftExchange.create({ shift: shiftId, requestedBy: req.user._id, date: shift.date, position: shift.position || req.user.position || '', note: note || '' });
     const populated = await ShiftExchange.findById(exchange._id).populate(EXCHANGE_POPULATE);
+
+    // Notify admins/managers via socket + push
+    try {
+      const io = req.app.get('io');
+      const managers = await User.find({ role: { $in: ['admin', 'manager'] } }, '_id');
+      for (const mgr of managers) {
+        if (mgr._id.toString() === req.user._id.toString()) continue;
+        const mgrId = mgr._id.toString();
+        if (io) io.to(mgrId).emit('shiftExchangeNew', { exchange: populated });
+        sendPush(mgrId, {
+          title: 'New Shift Exchange Request',
+          body: `${req.user.name} wants to exchange their shift on ${shift.date}.`,
+          icon: '/icon-192.png',
+          badge: '/icon-192.png',
+          data: { url: '/' },
+        }).catch(() => {});
+      }
+    } catch { /* non-critical */ }
+
     res.status(201).json(populated);
   } catch (err) {
     res.status(500).json({ message: err.message });
@@ -397,26 +420,42 @@ router.post('/exchanges', auth, async (req, res) => {
 
 router.post('/exchanges/:id/respond', auth, async (req, res) => {
   try {
-    const { response } = req.body;
+    const { response, availableDates } = req.body;
     if (!['available', 'declined'].includes(response)) return res.status(400).json({ message: 'Invalid response' });
     const exchange = await ShiftExchange.findById(req.params.id);
     if (!exchange || exchange.status !== 'open') return res.status(400).json({ message: 'Exchange not available' });
     if (exchange.requestedBy.toString() === req.user._id.toString()) return res.status(400).json({ message: 'Cannot respond to your own request' });
-    const idx = exchange.responses.findIndex((r) => r.employee.toString() === req.user._id.toString());
-    if (idx >= 0) { exchange.responses[idx].response = response; exchange.responses[idx].respondedAt = new Date(); }
-    else exchange.responses.push({ employee: req.user._id, response });
-    await exchange.save();
-
-    // Notify the requester
     const io = req.app.get('io');
-    if (response === 'available') {
+
+    if (response === 'declined') {
+      exchange.status = 'cancelled';
+      await exchange.save();
       await notify(io, exchange.requestedBy, {
-        type: 'exchange_response',
-        title: 'Someone can cover your shift',
-        body: `${req.user.name} is available to cover your shift on ${exchange.date}.`,
+        type: 'exchange_declined',
+        title: 'Shift Exchange Declined',
+        body: `${req.user.name} is not available to cover your shift on ${exchange.date}.`,
         link: '/',
       });
+      const populated = await ShiftExchange.findById(exchange._id).populate(EXCHANGE_POPULATE);
+      return res.json(populated);
     }
+
+    const idx = exchange.responses.findIndex((r) => r.employee.toString() === req.user._id.toString());
+    if (idx >= 0) {
+      exchange.responses[idx].response = response;
+      exchange.responses[idx].respondedAt = new Date();
+      if (availableDates) exchange.responses[idx].availableDates = availableDates;
+    } else {
+      exchange.responses.push({ employee: req.user._id, response, availableDates: availableDates || [] });
+    }
+    await exchange.save();
+
+    await notify(io, exchange.requestedBy, {
+      type: 'exchange_response',
+      title: 'Someone can cover your shift',
+      body: `${req.user.name} is available to cover your shift on ${exchange.date}.`,
+      link: '/',
+    });
 
     const populated = await ShiftExchange.findById(exchange._id).populate(EXCHANGE_POPULATE);
     res.json(populated);

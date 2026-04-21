@@ -3,6 +3,7 @@ const Conversation = require('../models/Conversation');
 const Message = require('../models/Message');
 const { auth } = require('../middleware/auth');
 const { encrypt, decrypt } = require('../utils/crypto');
+const { sendPush } = require('../utils/sendPush');
 
 // Decrypt content on a plain message object
 function decryptMessage(msg) {
@@ -116,6 +117,9 @@ router.get('/conversations/:id/messages', auth, async (req, res) => {
 router.post('/conversations/:id/messages', auth, async (req, res) => {
   try {
     const { content, type, replyTo } = req.body;
+    const conversation = await Conversation.findById(req.params.id);
+    if (!conversation) return res.status(404).json({ message: 'Conversation not found' });
+
     const message = await Message.create({
       conversation: req.params.id,
       sender: req.user._id,
@@ -133,7 +137,55 @@ router.post('/conversations/:id/messages', auth, async (req, res) => {
     if (obj.replyTo && obj.replyTo.content) {
       obj.replyTo = { ...obj.replyTo, content: decrypt(obj.replyTo.content) };
     }
+
+    // Emit socket + push notifications to all other participants
+    const io = req.app.get('io');
+    const senderId = req.user._id.toString();
+    conversation.participants.forEach((pid) => {
+      const recipientId = pid.toString();
+      if (recipientId === senderId) return;
+      if (io) {
+        io.to(recipientId).emit('messageNotification', {
+          conversationId: req.params.id,
+          message: obj,
+        });
+      }
+      sendPush(recipientId, {
+        title: `New message from ${req.user.name}`,
+        body: obj.content?.slice(0, 100) || 'New message',
+        icon: '/icon-192.png',
+        badge: '/icon-192.png',
+        data: { url: '/messages', conversationId: req.params.id },
+      }).catch(() => {});
+    });
+
     res.status(201).json(obj);
+  } catch (err) {
+    res.status(500).json({ message: err.message });
+  }
+});
+
+// Mark all messages as read for the current user
+router.post('/mark-all-read', auth, async (req, res) => {
+  try {
+    await Message.updateMany(
+      { sender: { $ne: req.user._id }, readBy: { $ne: req.user._id } },
+      { $addToSet: { readBy: req.user._id } }
+    );
+    res.json({ ok: true });
+  } catch (err) {
+    res.status(500).json({ message: err.message });
+  }
+});
+
+// Get unread message count (distinct conversations with unread messages)
+router.get('/unread-count', auth, async (req, res) => {
+  try {
+    const convIds = await Message.distinct('conversation', {
+      sender: { $ne: req.user._id },
+      readBy: { $ne: req.user._id },
+    });
+    res.json({ count: convIds.length });
   } catch (err) {
     res.status(500).json({ message: err.message });
   }

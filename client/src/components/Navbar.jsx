@@ -12,30 +12,44 @@ import {
   ChevronDown,
   Building2,
   ShieldCheck,
+  Sun,
+  Moon,
+  Megaphone,
+  UserCircle,
 } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
+import { useSocket } from '../contexts/SocketContext';
+import { useTheme } from '../contexts/ThemeContext';
 import ProfileModal from './ProfileModal';
 import NotificationBell from './NotificationBell';
 
 const MASTER_SCHEDULE_ROLES = ['admin', 'manager', 'charge_nurse'];
 const AUDIT_LOG_ROLES = ['admin', 'manager'];
+const STAFF_ROLES = ['admin', 'manager', 'charge_nurse'];
 
 const baseNavItems = [
   { to: '/', label: 'Dashboard', icon: LayoutDashboard },
   { to: '/schedule', label: 'Schedule', icon: Calendar },
   { to: '/messages', label: 'Messages', icon: MessageCircle },
-  { to: '/employees', label: 'Staff', icon: Users },
+  { to: '/announcements', label: 'Announcements', icon: Megaphone },
 ];
 
 export default function Navbar() {
   const { user, logout } = useAuth();
+  const { activeDepartment, setActiveDepartment } = useAuth();
+  const { unreadMessages, clearUnreadMessages } = useSocket();
+  const { dark, toggle: toggleTheme } = useTheme();
   const location = useLocation();
   const navigate = useNavigate();
   const [open, setOpen] = useState(false);
   const [showProfile, setShowProfile] = useState(false);
   const [deptOpen, setDeptOpen] = useState(false);
   const deptRef = useRef(null);
-  const { activeDepartment, setActiveDepartment } = useAuth();
+
+  // Clear badge whenever on messages page (handles navigation + new messages arriving while already there)
+  useEffect(() => {
+    if (location.pathname === '/messages' && unreadMessages > 0) clearUnreadMessages();
+  }, [location.pathname, unreadMessages, clearUnreadMessages]);
 
   // Close dept dropdown on outside click
   useEffect(() => {
@@ -44,10 +58,11 @@ export default function Navbar() {
     return () => document.removeEventListener('mousedown', handler);
   }, []);
 
-  const isMultiDept = ['admin', 'manager'].includes(user?.role) && (user?.departments?.length > 1 || user?.role === 'admin');
+  const isMultiDept = (user?.departments?.length > 1) || user?.role === 'admin';
 
   const navItems = [
     ...baseNavItems,
+    ...(STAFF_ROLES.includes(user?.role) ? [{ to: '/employees', label: 'Staff', icon: Users }] : []),
     ...(MASTER_SCHEDULE_ROLES.includes(user?.role) ? [{ to: '/master-schedule', label: 'Master Schedule', icon: CalendarRange }] : []),
     ...(AUDIT_LOG_ROLES.includes(user?.role) ? [{ to: '/audit-log', label: 'Audit Log', icon: ShieldCheck }] : []),
   ];
@@ -65,11 +80,11 @@ export default function Navbar() {
     .slice(0, 2);
 
   return (
-    <nav className="bg-white border-b border-gray-200 sticky top-0 z-50">
+    <nav className="bg-white dark:bg-gray-900 border-b border-gray-200 dark:border-gray-700 sticky top-0 z-50">
       <div className="px-4 mx-auto">
         <div className="flex h-16 items-center justify-between">
           {/* Logo */}
-          <Link to="/" className="flex items-center gap-2 font-bold text-xl text-blue-600">
+          <Link to="/" className="flex items-center gap-2 font-bold text-xl text-blue-500 dark:text-blue-400">
             <Calendar className="h-6 w-6" />
             <span>KronosPortal</span>
           </Link>
@@ -80,14 +95,19 @@ export default function Navbar() {
               <Link
                 key={to}
                 to={to}
-                className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
+                className={`relative flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
                   location.pathname === to
-                    ? 'bg-blue-50 text-blue-600'
-                    : 'text-gray-600 hover:bg-gray-100'
+                    ? 'bg-blue-50 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400'
+                    : 'text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800'
                 }`}
               >
                 <Icon className="h-4 w-4" />
                 {label}
+                {to === '/messages' && unreadMessages > 0 && (
+                  <span className="absolute -top-0.5 -right-0.5 min-w-[16px] h-4 bg-red-500 text-white text-[9px] font-bold rounded-full flex items-center justify-center px-1 leading-none">
+                    {unreadMessages > 9 ? '9+' : unreadMessages}
+                  </span>
+                )}
               </Link>
             ))}
           </div>
@@ -130,10 +150,17 @@ export default function Navbar() {
               </div>
             )}
 
+            <button
+              onClick={toggleTheme}
+              className="p-2 text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-lg transition-colors"
+              title={dark ? 'Switch to light mode' : 'Switch to dark mode'}
+            >
+              {dark ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
+            </button>
             <NotificationBell />
             <button
               onClick={() => setShowProfile(true)}
-              className="flex items-center gap-2 hover:bg-gray-50 rounded-lg px-2 py-1 transition-colors"
+              className="flex items-center gap-2 hover:bg-gray-50 dark:hover:bg-gray-800 rounded-lg px-2 py-1 transition-colors"
               title="Edit profile"
             >
               {user?.avatar ? (
@@ -151,9 +178,9 @@ export default function Navbar() {
                 </div>
               )}
               <div className="text-sm text-left">
-                <p className="font-medium text-gray-900">{user?.name}</p>
+                <p className="font-medium text-gray-900 dark:text-gray-100">{user?.name}</p>
                 <div className="flex items-center gap-1.5 flex-wrap">
-                  <span className="text-gray-500 capitalize">{user?.role?.replace('_', ' ')}</span>
+                  <span className="text-gray-500 dark:text-gray-400 capitalize">{user?.role?.replace('_', ' ')}</span>
                   {!isMultiDept && activeDepartment && (
                     <>
                       <span className="text-gray-300">·</span>
@@ -189,25 +216,30 @@ export default function Navbar() {
 
       {/* Mobile menu */}
       {open && (
-        <div className="md:hidden border-t border-gray-100 px-4 py-3 space-y-1">
+        <div className="md:hidden border-t border-gray-100 dark:border-gray-700 bg-white dark:bg-gray-900 px-4 py-3 space-y-1">
           {navItems.map(({ to, label, icon: Icon }) => (
             <Link
               key={to}
               to={to}
               onClick={() => setOpen(false)}
-              className={`flex items-center gap-3 px-3 py-2 rounded-lg text-sm font-medium ${
+              className={`relative flex items-center gap-3 px-3 py-2 rounded-lg text-sm font-medium ${
                 location.pathname === to
-                  ? 'bg-blue-50 text-blue-600'
-                  : 'text-gray-600 hover:bg-gray-100'
+                  ? 'bg-blue-50 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400'
+                  : 'text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800'
               }`}
             >
               <Icon className="h-4 w-4" />
               {label}
+              {to === '/messages' && unreadMessages > 0 && (
+                <span className="ml-auto min-w-[18px] h-[18px] bg-red-500 text-white text-[9px] font-bold rounded-full flex items-center justify-center px-1 leading-none">
+                  {unreadMessages > 9 ? '9+' : unreadMessages}
+                </span>
+              )}
             </Link>
           ))}
           <button
-            onClick={() => { setOpen(false); setShowProfile(true); }}
-            className="flex items-center gap-3 w-full px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-100 rounded-lg"
+            onClick={() => { setOpen(false); navigate('/profile'); }}
+            className="flex items-center gap-3 w-full px-3 py-2 text-sm font-medium text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-lg"
           >
             {user?.avatar ? (
               <img src={user.avatar} alt="Profile" className="w-5 h-5 rounded-full object-cover" />
@@ -219,7 +251,7 @@ export default function Navbar() {
                 {initials}
               </div>
             )}
-            <span className="flex-1">Edit Profile</span>
+            <span className="flex-1">My Profile</span>
             {activeDepartment && (
               <span className="text-xs font-semibold px-1.5 py-0.5 rounded-full bg-blue-100 text-blue-700">
                 {activeDepartment}
@@ -251,8 +283,15 @@ export default function Navbar() {
             </div>
           )}
           <button
+            onClick={toggleTheme}
+            className="flex items-center gap-3 w-full px-3 py-2 text-sm font-medium text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-lg"
+          >
+            {dark ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
+            {dark ? 'Light Mode' : 'Dark Mode'}
+          </button>
+          <button
             onClick={handleLogout}
-            className="flex items-center gap-3 w-full px-3 py-2 text-sm font-medium text-red-600 hover:bg-red-50 rounded-lg"
+            className="flex items-center gap-3 w-full px-3 py-2 text-sm font-medium text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-lg"
           >
             <LogOut className="h-4 w-4" />
             Logout

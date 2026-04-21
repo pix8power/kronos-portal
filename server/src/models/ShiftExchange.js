@@ -16,6 +16,7 @@ const shiftExchangeSchema = new mongoose.Schema(
       {
         employee: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
         response: { type: String, enum: ['available', 'declined'] },
+        availableDates: [{ type: String }],
         respondedAt: { type: Date, default: Date.now },
       },
     ],

@@ -1,10 +1,12 @@
 import { useState, useEffect } from 'react';
+import { useDebounce } from '../hooks/useDebounce';
 import { usersAPI } from '../services/api';
 import { useAuth } from '../contexts/AuthContext';
 import { useSocket } from '../contexts/SocketContext';
 import { useNavigate } from 'react-router-dom';
 import { messagesAPI } from '../services/api';
-import { Users, Search, MessageCircle, Mail, Phone, Shield, Trash2 } from 'lucide-react';
+import { Users, Search, MessageCircle, Mail, Phone, Shield, Trash2, X } from 'lucide-react';
+import { DEPARTMENTS } from '../constants/departments';
 
 const ROLE_COLORS = {
   admin: 'bg-red-100 text-red-700',
@@ -21,6 +23,7 @@ export default function Employees() {
 
   const [employees, setEmployees] = useState([]);
   const [search, setSearch] = useState('');
+  const debouncedSearch = useDebounce(search, 250);
   const [loading, setLoading] = useState(true);
   const [roleError, setRoleError] = useState('');
   const [confirmDelete, setConfirmDelete] = useState(null);
@@ -66,12 +69,37 @@ export default function Employees() {
     }
   };
 
+  const saveDepts = async (empId, department, departments) => {
+    try {
+      const res = await usersAPI.update(empId, { department, departments });
+      setEmployees((prev) => prev.map((e) => (e._id === empId ? res.data : e)));
+    } catch (err) {
+      setRoleError(err.response?.data?.message || 'Failed to update departments');
+    }
+  };
+
+  const handleAddDept = (emp, dept) => {
+    const depts = [...new Set([...(emp.departments || [emp.department].filter(Boolean)), dept])];
+    const primary = emp.department || dept;
+    saveDepts(emp._id, primary, depts);
+  };
+
+  const handleRemoveDept = (emp, dept) => {
+    const depts = (emp.departments || [emp.department].filter(Boolean)).filter((d) => d !== dept);
+    const primary = depts[0] || '';
+    saveDepts(emp._id, primary, depts);
+  };
+
+  const handlePrimaryDept = (emp, dept) => {
+    saveDepts(emp._id, dept, emp.departments || [dept]);
+  };
+
   const filtered = employees.filter(
     (e) =>
-      e.name.toLowerCase().includes(search.toLowerCase()) ||
-      e.email.toLowerCase().includes(search.toLowerCase()) ||
-      (e.position || '').toLowerCase().includes(search.toLowerCase()) ||
-      (e.department || '').toLowerCase().includes(search.toLowerCase())
+      e.name.toLowerCase().includes(debouncedSearch.toLowerCase()) ||
+      e.email.toLowerCase().includes(debouncedSearch.toLowerCase()) ||
+      (e.position || '').toLowerCase().includes(debouncedSearch.toLowerCase()) ||
+      (e.department || '').toLowerCase().includes(debouncedSearch.toLowerCase())
   );
 
   if (loading) {
@@ -172,6 +200,57 @@ export default function Employees() {
                   </div>
                 )}
               </div>
+
+              {/* Department editor — admin/manager only */}
+              {isAdmin && (
+                <div className="mt-3 pt-3 border-t border-gray-100">
+                  <p className="text-[10px] font-semibold text-gray-400 uppercase tracking-wider mb-1.5">Departments</p>
+                  <div className="flex flex-wrap gap-1 items-center">
+                    {(emp.departments?.length > 0 ? emp.departments : emp.department ? [emp.department] : []).map((d) => (
+                      <span
+                        key={d}
+                        className={`inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full font-medium ${d === emp.department ? 'bg-blue-100 text-blue-700' : 'bg-gray-100 text-gray-600'}`}
+                      >
+                        {d === emp.department && <span className="w-1.5 h-1.5 rounded-full bg-blue-500 flex-shrink-0" />}
+                        {d}
+                        <button
+                          onClick={() => handleRemoveDept(emp, d)}
+                          className="ml-0.5 hover:text-red-500 transition-colors leading-none"
+                          title="Remove"
+                        >
+                          <X className="h-3 w-3" />
+                        </button>
+                      </span>
+                    ))}
+                    {/* Add dept dropdown */}
+                    {DEPARTMENTS.filter((d) => !(emp.departments?.length > 0 ? emp.departments : emp.department ? [emp.department] : []).includes(d)).length > 0 && (
+                      <select
+                        value=""
+                        onChange={(e) => e.target.value && handleAddDept(emp, e.target.value)}
+                        className="text-xs border border-dashed border-gray-300 rounded-full px-2 py-0.5 text-gray-400 bg-white focus:outline-none hover:border-blue-400 cursor-pointer"
+                      >
+                        <option value="">+ Add</option>
+                        {DEPARTMENTS.filter((d) => !(emp.departments?.length > 0 ? emp.departments : emp.department ? [emp.department] : []).includes(d)).map((d) => (
+                          <option key={d} value={d}>{d}</option>
+                        ))}
+                      </select>
+                    )}
+                  </div>
+                  {/* Primary dept picker — only when multiple assigned */}
+                  {(emp.departments?.length > 1) && (
+                    <div className="mt-1.5 flex items-center gap-1.5">
+                      <span className="text-[10px] text-gray-400">Primary:</span>
+                      <select
+                        value={emp.department}
+                        onChange={(e) => handlePrimaryDept(emp, e.target.value)}
+                        className="text-xs border border-gray-200 rounded-md px-1.5 py-0.5 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                      >
+                        {emp.departments.map((d) => <option key={d} value={d}>{d}</option>)}
+                      </select>
+                    </div>
+                  )}
+                </div>
+              )}
 
               <div className="mt-4 flex items-center justify-between gap-2">
                 <span className={`text-xs ${isOnline ? 'text-green-600' : 'text-gray-400'}`}>

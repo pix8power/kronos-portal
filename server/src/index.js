@@ -13,7 +13,11 @@ const messageRoutes = require('./routes/messages');
 const timeCorrectionRoutes = require('./routes/timecorrections');
 const masterScheduleRoutes = require('./routes/masterSchedule');
 const notificationRoutes = require('./routes/notifications');
+const pushRoutes = require('./routes/push');
+const announcementRoutes = require('./routes/announcements');
 const { initSocket } = require('./socket');
+const { startShiftReminderJob } = require('./jobs/shiftReminders');
+const { startExpiryReminderJob } = require('./jobs/expiryReminders');
 
 // Allowed origins: web dev, Capacitor Android (http://localhost), Capacitor iOS (capacitor://localhost)
 const ALLOWED_ORIGINS = [
@@ -43,6 +47,7 @@ const app = express();
 const server = http.createServer(app);
 const io = new Server(server, {
   cors: { ...corsOptions, methods: ['GET', 'POST'] },
+  maxHttpBufferSize: 5e6, // 5MB — needed for image messages
 });
 
 // Middleware
@@ -51,15 +56,15 @@ app.use(express.json());
 
 // Rate limiting
 const apiLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000, // 15 minutes
-  max: 300,
+  windowMs: 15 * 60 * 1000,
+  max: process.env.NODE_ENV === 'production' ? 300 : 2000,
   standardHeaders: true,
   legacyHeaders: false,
   message: { message: 'Too many requests, please try again later.' },
 });
 const authLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
-  max: 20,
+  max: process.env.NODE_ENV === 'production' ? 20 : 200,
   standardHeaders: true,
   legacyHeaders: false,
   message: { message: 'Too many login attempts, please try again later.' },
@@ -76,6 +81,13 @@ app.use('/api/messages', messageRoutes);
 app.use('/api/timecorrections', timeCorrectionRoutes);
 app.use('/api/master-schedule', masterScheduleRoutes);
 app.use('/api/notifications', notificationRoutes);
+app.use('/api/push', pushRoutes);
+app.use('/api/announcements', announcementRoutes);
+app.use('/api/open-shifts', require('./routes/openShifts'));
+app.use('/api/recurring-shifts', require('./routes/recurringShifts'));
+app.use('/api/profile', require('./routes/profile'));
+app.use('/api/ical', require('./routes/ical'));
+app.use('/uploads', require('express').static(require('path').join(__dirname, '../uploads')));
 
 app.get('/api/health', (req, res) => res.json({ status: 'ok' }));
 
@@ -90,6 +102,8 @@ mongoose
   .connect(process.env.MONGODB_URI)
   .then(() => {
     console.log('MongoDB connected');
+    startShiftReminderJob();
+    startExpiryReminderJob();
     const PORT = process.env.PORT || 5000;
     server.listen(PORT, () => console.log(`Server running on port ${PORT}`));
   })

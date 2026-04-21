@@ -2,7 +2,12 @@ import { useState, useEffect } from 'react';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
 import { SocketProvider } from './contexts/SocketContext';
+import { ToastProvider } from './contexts/ToastContext';
+import { ThemeProvider } from './contexts/ThemeContext';
 import Navbar from './components/Navbar';
+import OfflineBanner from './components/OfflineBanner';
+import PullToRefresh from './components/PullToRefresh';
+import SessionExpired from './components/SessionExpired';
 import Login from './pages/Login';
 import Register from './pages/Register';
 import Dashboard from './pages/Dashboard';
@@ -13,7 +18,11 @@ import MasterSchedule from './pages/MasterSchedule';
 import AuditLog from './pages/AuditLog';
 import ForgotPassword from './pages/ForgotPassword';
 import ResetPassword from './pages/ResetPassword';
+import Announcements from './pages/Announcements';
+import Profile from './pages/Profile';
 import { useSessionTimeout } from './hooks/useSessionTimeout';
+import { usePushNotifications } from './hooks/usePushNotifications';
+import { useFcmNotifications } from './hooks/useFcmNotifications';
 
 const ProtectedRoute = ({ children }) => {
   const { user, loading } = useAuth();
@@ -30,23 +39,32 @@ const ProtectedRoute = ({ children }) => {
 // Session warning banner — appears 1 min before auto-logout
 function SessionWarningBanner() {
   const [show, setShow] = useState(false);
+  const [expired, setExpired] = useState(false);
   useEffect(() => {
-    const handler = () => { setShow(true); setTimeout(() => setShow(false), 55000); };
-    window.addEventListener('session-warning', handler);
-    return () => window.removeEventListener('session-warning', handler);
+    const onWarning = () => { setShow(true); setTimeout(() => setShow(false), 55000); };
+    const onExpired = () => setExpired(true);
+    window.addEventListener('session-warning', onWarning);
+    window.addEventListener('session-expired', onExpired);
+    return () => { window.removeEventListener('session-warning', onWarning); window.removeEventListener('session-expired', onExpired); };
   }, []);
-  if (!show) return null;
   return (
-    <div className="fixed bottom-4 left-1/2 -translate-x-1/2 z-[100] bg-amber-500 text-white text-sm font-medium px-5 py-3 rounded-xl shadow-lg flex items-center gap-3 animate-bounce-once">
-      <span>Your session will expire in 1 minute due to inactivity.</span>
-      <button onClick={() => { setShow(false); window.dispatchEvent(new MouseEvent('mousemove')); }} className="underline hover:no-underline">Stay logged in</button>
-    </div>
+    <>
+      {expired && <SessionExpired />}
+      {show && !expired && (
+        <div className="fixed bottom-4 left-1/2 -translate-x-1/2 z-[100] bg-amber-500 text-white text-sm font-medium px-5 py-3 rounded-xl shadow-lg flex items-center gap-3 animate-bounce-once">
+          <span>Your session will expire in 1 minute due to inactivity.</span>
+          <button onClick={() => { setShow(false); window.dispatchEvent(new MouseEvent('mousemove')); }} className="underline hover:no-underline">Stay logged in</button>
+        </div>
+      )}
+    </>
   );
 }
 
 const AppLayout = ({ children }) => (
-  <div className="min-h-screen bg-gray-50">
+  <div className="min-h-screen bg-gray-50 dark:bg-gray-950">
+    <OfflineBanner />
     <Navbar />
+    <PullToRefresh onRefresh={() => window.location.reload()} />
     <main className="max-w-full">{children}</main>
   </div>
 );
@@ -54,6 +72,8 @@ const AppLayout = ({ children }) => (
 function AppRoutes() {
   const { user } = useAuth();
   useSessionTimeout();
+  usePushNotifications();
+  useFcmNotifications();
 
   return (
     <>
@@ -69,6 +89,9 @@ function AppRoutes() {
         <Route path="/employees" element={<ProtectedRoute><AppLayout><Employees /></AppLayout></ProtectedRoute>} />
         <Route path="/master-schedule" element={<ProtectedRoute><AppLayout><MasterSchedule /></AppLayout></ProtectedRoute>} />
         <Route path="/audit-log" element={<ProtectedRoute><AppLayout><AuditLog /></AppLayout></ProtectedRoute>} />
+        <Route path="/announcements" element={<ProtectedRoute><AppLayout><Announcements /></AppLayout></ProtectedRoute>} />
+        <Route path="/profile" element={<ProtectedRoute><AppLayout><Profile /></AppLayout></ProtectedRoute>} />
+        <Route path="/profile/:id" element={<ProtectedRoute><AppLayout><Profile /></AppLayout></ProtectedRoute>} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
     </>
@@ -77,12 +100,16 @@ function AppRoutes() {
 
 export default function App() {
   return (
-    <AuthProvider>
-      <SocketProvider>
-        <BrowserRouter>
-          <AppRoutes />
-        </BrowserRouter>
-      </SocketProvider>
-    </AuthProvider>
+    <ThemeProvider>
+      <AuthProvider>
+        <SocketProvider>
+          <ToastProvider>
+            <BrowserRouter>
+              <AppRoutes />
+            </BrowserRouter>
+          </ToastProvider>
+        </SocketProvider>
+      </AuthProvider>
+    </ThemeProvider>
   );
 }

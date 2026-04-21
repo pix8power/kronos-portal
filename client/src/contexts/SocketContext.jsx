@@ -1,13 +1,16 @@
-import { createContext, useContext, useEffect, useRef, useState } from 'react';
+import { createContext, useContext, useEffect, useRef, useState, useCallback } from 'react';
 import { io } from 'socket.io-client';
 import { useAuth } from './AuthContext';
+import api from '../services/api';
 
 const SocketContext = createContext(null);
 
 export const SocketProvider = ({ children }) => {
   const { user } = useAuth();
   const socketRef = useRef(null);
+  const [socket, setSocket] = useState(null);
   const [onlineUsers, setOnlineUsers] = useState(new Set());
+  const [unreadMessages, setUnreadMessages] = useState(0);
 
   useEffect(() => {
     if (!user) {
@@ -15,19 +18,28 @@ export const SocketProvider = ({ children }) => {
         socketRef.current.disconnect();
         socketRef.current = null;
       }
+      setSocket(null);
       return;
     }
 
     const token = localStorage.getItem('token');
     const socketUrl = import.meta.env.VITE_SOCKET_URL || '/';
-    const socket = io(socketUrl, { auth: { token }, transports: ['websocket', 'polling'] });
-    socketRef.current = socket;
+    const s = io(socketUrl, { auth: { token }, transports: ['websocket', 'polling'] });
+    socketRef.current = s;
 
-    socket.on('userOnline', ({ userId }) => {
+    s.on('connect', () => {
+      setSocket(s);
+      // Sync badge with actual DB unread count on every (re)connect
+      api.get('/messages/unread-count')
+        .then(({ data }) => setUnreadMessages(data.count || 0))
+        .catch(() => {});
+    });
+
+    s.on('userOnline', ({ userId }) => {
       setOnlineUsers((prev) => new Set([...prev, userId]));
     });
 
-    socket.on('userOffline', ({ userId }) => {
+    s.on('userOffline', ({ userId }) => {
       setOnlineUsers((prev) => {
         const next = new Set(prev);
         next.delete(userId);
@@ -35,16 +47,23 @@ export const SocketProvider = ({ children }) => {
       });
     });
 
+    s.on('messageNotification', () => {
+      setUnreadMessages((n) => n + 1);
+    });
+
     return () => {
-      socket.disconnect();
+      s.disconnect();
       socketRef.current = null;
+      setSocket(null);
     };
   }, [user]);
 
-  const getSocket = () => socketRef.current;
+  const getSocket = useCallback(() => socketRef.current, []);
+  const incrementUnreadMessages = useCallback(() => setUnreadMessages((n) => n + 1), []);
+  const clearUnreadMessages = useCallback(() => setUnreadMessages(0), []);
 
   return (
-    <SocketContext.Provider value={{ getSocket, onlineUsers }}>
+    <SocketContext.Provider value={{ socket, getSocket, onlineUsers, unreadMessages, incrementUnreadMessages, clearUnreadMessages }}>
       {children}
     </SocketContext.Provider>
   );

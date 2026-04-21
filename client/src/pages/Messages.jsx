@@ -5,15 +5,22 @@ import { useAuth } from '../contexts/AuthContext';
 import ConversationList from '../components/messaging/ConversationList';
 import ChatWindow from '../components/messaging/ChatWindow';
 import { MessageCircle } from 'lucide-react';
+import { ConversationSkeleton } from '../components/Skeleton';
 
 export default function Messages() {
   const { user } = useAuth();
-  const { getSocket } = useSocket();
+  const { getSocket, clearUnreadMessages } = useSocket();
   const [conversations, setConversations] = useState([]);
   const [allUsers, setAllUsers] = useState([]);
   const [selected, setSelected] = useState(null);
   const [loading, setLoading] = useState(true);
   const [mobileShowChat, setMobileShowChat] = useState(false);
+
+  // Clear badge and mark all as read in DB when Messages page opens
+  useEffect(() => {
+    clearUnreadMessages();
+    messagesAPI.markAllRead().catch(() => {});
+  }, [clearUnreadMessages]);
 
   useEffect(() => {
     Promise.all([messagesAPI.getConversations(), usersAPI.getAll()])
@@ -39,14 +46,14 @@ export default function Messages() {
       );
     };
 
+    const onNewMessage = ({ conversationId, message }) => onNotification({ conversationId, message });
+
     socket.on('messageNotification', onNotification);
-    socket.on('newMessage', ({ conversationId, message }) => {
-      onNotification({ conversationId, message });
-    });
+    socket.on('newMessage', onNewMessage);
 
     return () => {
       socket.off('messageNotification', onNotification);
-      socket.off('newMessage');
+      socket.off('newMessage', onNewMessage);
     };
   }, [getSocket]);
 
@@ -84,8 +91,15 @@ export default function Messages() {
 
   if (loading) {
     return (
-      <div className="flex items-center justify-center h-[calc(100vh-4rem)]">
-        <div className="animate-spin rounded-full h-10 w-10 border-b-2 border-blue-600" />
+      <div className="h-[calc(100vh-4rem)] flex overflow-hidden">
+        <div className="w-full md:w-80 lg:w-96 flex-col flex-shrink-0 border-r border-gray-100">
+          <div className="p-4 border-b border-gray-100">
+            <div className="h-9 bg-gray-200 rounded-lg animate-pulse" />
+          </div>
+          <div className="divide-y divide-gray-50">
+            {[1,2,3,4,5].map((i) => <ConversationSkeleton key={i} />)}
+          </div>
+        </div>
       </div>
     );
   }

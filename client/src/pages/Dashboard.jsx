@@ -1,21 +1,23 @@
 import { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
-import { format, startOfWeek, endOfWeek, addWeeks } from 'date-fns';
+import { format, startOfWeek, endOfWeek, addWeeks, addDays, eachDayOfInterval, parseISO, differenceInCalendarDays } from 'date-fns';
 import {
-  Calendar, MessageCircle, Users, Clock, TrendingUp, ChevronRight,
+  Calendar, Clock, TrendingUp, ChevronRight, Users,
   AlarmClockPlus, Plus, Check, X, Trash2, AlertCircle, ArrowLeftRight,
-  LogIn, LogOut,
+  UserCircle, ChevronRight as Arrow,
 } from 'lucide-react';
-import { schedulesAPI, usersAPI, messagesAPI, timeCorrectionAPI, exchangeAPI } from '../services/api';
-import { differenceInCalendarDays, parseISO } from 'date-fns';
+import { schedulesAPI, timeCorrectionAPI, exchangeAPI, profileAPI } from '../services/api';
 import { useAuth } from '../contexts/AuthContext';
+import { useSocket } from '../contexts/SocketContext';
+import { ExchangeCardSkeleton, StaffGridSkeleton } from '../components/Skeleton';
 
-const TABS = [
-  { key: 'overview',       label: 'Overview' },
-  { key: 'shiftexchange',  label: 'Shift Exchange' },
-  { key: 'timeoff',        label: 'Time Off' },
-  { key: 'timecorrection', label: 'Time Correction' },
+const ALL_TABS = [
+  { key: 'overview',       label: 'Overview',         privileged: true },
+  { key: 'shiftexchange',  label: 'Shift Exchange',   privileged: false },
+  { key: 'timeoff',        label: 'Time Off',         privileged: false },
+  { key: 'timecorrection', label: 'Time Correction',  privileged: false },
 ];
+const PRIVILEGED_ROLES = ['admin', 'manager', 'charge_nurse'];
 
 const LEAVE_TYPES = [
   { value: 'vacation',    label: 'Vacation / PTO',      color: 'bg-blue-100 text-blue-700' },
@@ -713,6 +715,7 @@ function ShiftExchangeTab({ user }) {
   const [requests, setRequests]   = useState([]); // own (employee) or all (admin)
   const [available, setAvailable] = useState([]); // cover opportunities for employee
   const [myShifts, setMyShifts]   = useState([]); // own upcoming shifts for the form
+  const [myShiftDates, setMyShiftDates] = useState(new Set()); // all shift dates (YYYY-MM-DD) for off-day calc
   const [loading, setLoading]     = useState(true);
   const [showForm, setShowForm]   = useState(false);
   const [form, setForm]           = useState({ shiftId: '', note: '' });
@@ -720,6 +723,7 @@ function ShiftExchangeTab({ user }) {
   const [error, setError]         = useState('');
   const [approving, setApproving] = useState(null);
   const [responding, setResponding] = useState(null);
+  const [expandedPicker, setExpandedPicker] = useState({}); // exchangeId → [selectedDates]
 
   const load = async () => {
     setLoading(true);
@@ -738,7 +742,9 @@ function ShiftExchangeTab({ user }) {
       const openShiftIds = new Set(
         (exchRes.data.requests || []).filter((e) => e.status === 'open').map((e) => e.shift?._id)
       );
-      setMyShifts((shiftsRes.data || []).filter((s) => !openShiftIds.has(s._id)));
+      const allShifts = shiftsRes.data || [];
+      setMyShiftDates(new Set(allShifts.map((s) => s.date)));
+      setMyShifts(allShifts.filter((s) => !openShiftIds.has(s._id)));
     } catch (err) {
       console.error(err);
     } finally {
@@ -766,16 +772,56 @@ function ShiftExchangeTab({ user }) {
     }
   };
 
-  const handleRespond = async (exchangeId, response) => {
+  const handleRespond = async (exchangeId, response, availableDates) => {
     setResponding(exchangeId + response);
     try {
-      const res = await exchangeAPI.respond(exchangeId, { response });
-      setAvailable((prev) => prev.map((e) => (e._id === exchangeId ? res.data : e)));
+      const res = await exchangeAPI.respond(exchangeId, { response, availableDates });
+      if (response === 'declined') {
+        setAvailable((prev) => prev.filter((e) => e._id !== exchangeId));
+      } else {
+        setAvailable((prev) => prev.map((e) => (e._id === exchangeId ? res.data : e)));
+      }
     } catch (err) {
       console.error(err);
     } finally {
       setResponding(null);
     }
+  };
+
+  const openPicker = (exchangeId) => {
+    setExpandedPicker((prev) => {
+      if (prev[exchangeId] !== undefined) return prev; // already open
+      const next = Object.assign({}, prev);
+      next[exchangeId] = [];
+      return next;
+    });
+  };
+
+  const closePicker = (exchangeId) => {
+    setExpandedPicker((prev) => {
+      const next = Object.assign({}, prev);
+      delete next[exchangeId];
+      return next;
+    });
+  };
+
+  const toggleDate = (exchangeId, dateStr) => {
+    setExpandedPicker((prev) => {
+      const cur = prev[exchangeId] || [];
+      const next = Object.assign({}, prev);
+      next[exchangeId] = cur.includes(dateStr) ? cur.filter((d) => d !== dateStr) : cur.concat(dateStr);
+      return next;
+    });
+  };
+
+  const submitAvailable = async (exchange) => {
+    const dates = expandedPicker[exchange._id] || [];
+    await handleRespond(exchange._id, 'available', dates);
+    setExpandedPicker((prev) => {
+      const next = Object.assign({}, prev);
+      delete next[exchange._id];
+      return next;
+    });
   };
 
   const handleApprove = async (exchangeId, acceptedById) => {
@@ -815,8 +861,8 @@ function ShiftExchangeTab({ user }) {
   };
 
   if (loading) return (
-    <div className="flex justify-center py-12">
-      <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600" />
+    <div className="space-y-3">
+      {[1,2,3].map((i) => <ExchangeCardSkeleton key={i} />)}
     </div>
   );
 
@@ -921,6 +967,21 @@ function ShiftExchangeTab({ user }) {
               {available.map((exchange) => {
                 const resp = myResponse(exchange);
                 const shift = exchange.shift;
+                const pickerOpen = expandedPicker[exchange._id] !== undefined;
+                const selDates = pickerOpen ? (expandedPicker[exchange._id] || []) : [];
+                const myResp = exchange.responses ? exchange.responses.find((r) => (r.employee?._id || r.employee) === user._id) : null;
+
+                // Compute off-days only when picker is open
+                let offDays = [];
+                if (pickerOpen) {
+                  const exchDate = parseISO(exchange.date + 'T00:00:00');
+                  const windowDates = eachDayOfInterval({ start: addDays(exchDate, -7), end: addDays(exchDate, 7) });
+                  offDays = windowDates.filter((d) => {
+                    const str = format(d, 'yyyy-MM-dd');
+                    return str !== exchange.date && !myShiftDates.has(str);
+                  });
+                }
+
                 return (
                   <div key={exchange._id} className="bg-white rounded-xl border border-gray-100 shadow-sm p-4">
                     <div className="flex flex-wrap items-start justify-between gap-3">
@@ -950,32 +1011,99 @@ function ShiftExchangeTab({ user }) {
                         "{exchange.note}"
                       </p>
                     )}
+
+                    {/* Already responded — show selected dates */}
+                    {resp === 'available' && myResp && myResp.availableDates && myResp.availableDates.length > 0 && (
+                      <div className="mt-2 flex flex-wrap gap-1">
+                        {myResp.availableDates.map((d) => (
+                          <span key={d} className="text-[10px] bg-green-100 text-green-700 border border-green-200 px-1.5 py-0.5 rounded">
+                            {format(parseISO(d + 'T00:00:00'), 'MMM d')}
+                          </span>
+                        ))}
+                      </div>
+                    )}
+
                     <div className="flex gap-2 mt-3">
                       <button
-                        onClick={() => handleRespond(exchange._id, 'available')}
-                        disabled={!!responding}
-                        className={`flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg font-medium transition-colors ${
+                        type="button"
+                        onTouchEnd={(e) => { e.preventDefault(); openPicker(exchange._id); }}
+                        onClick={() => openPicker(exchange._id)}
+                        className={`flex items-center gap-1.5 text-xs px-4 py-2.5 rounded-lg font-medium ${
                           resp === 'available'
                             ? 'bg-green-600 text-white'
-                            : 'bg-green-50 text-green-700 hover:bg-green-100 border border-green-200'
+                            : 'bg-green-50 text-green-700 border border-green-200'
                         }`}
                       >
-                        <Check className="h-3.5 w-3.5" />
+                        <Check className="h-4 w-4" />
                         {resp === 'available' ? "I'm Available ✓" : "I'm Available"}
                       </button>
                       <button
+                        type="button"
+                        onTouchEnd={(e) => { e.preventDefault(); handleRespond(exchange._id, 'declined'); }}
                         onClick={() => handleRespond(exchange._id, 'declined')}
                         disabled={!!responding}
-                        className={`flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg font-medium transition-colors ${
+                        className={`flex items-center gap-1.5 text-xs px-4 py-2.5 rounded-lg font-medium ${
                           resp === 'declined'
                             ? 'bg-gray-500 text-white'
-                            : 'bg-gray-50 text-gray-600 hover:bg-gray-100 border border-gray-200'
+                            : 'bg-gray-50 text-gray-600 border border-gray-200'
                         }`}
                       >
-                        <X className="h-3.5 w-3.5" />
+                        <X className="h-4 w-4" />
                         Not Available
                       </button>
                     </div>
+
+                    {/* Off-day dropdown */}
+                    {pickerOpen && (
+                      <div className="mt-3 border border-green-200 rounded-xl bg-green-50 p-3">
+                        <p className="text-xs font-semibold text-green-800 mb-2">
+                          Which of your days off can you work?
+                        </p>
+                        {offDays.length === 0 ? (
+                          <p className="text-xs text-gray-500 italic mb-3">No days off found in this window.</p>
+                        ) : (
+                          <div className="flex flex-col gap-1 mb-3">
+                            {offDays.map((d) => {
+                              const str = format(d, 'yyyy-MM-dd');
+                              const sel = selDates.includes(str);
+                              return (
+                                <button
+                                  key={str}
+                                  type="button"
+                                  onTouchEnd={(e) => { e.preventDefault(); toggleDate(exchange._id, str); }}
+                                  onClick={() => toggleDate(exchange._id, str)}
+                                  className={`flex items-center justify-between w-full px-3 py-2.5 rounded-lg text-sm font-medium ${
+                                    sel ? 'bg-green-600 text-white' : 'bg-white text-gray-700 border border-gray-200'
+                                  }`}
+                                >
+                                  <span>{format(d, 'EEEE, MMM d')}</span>
+                                  {sel && <Check className="h-4 w-4 flex-shrink-0" />}
+                                </button>
+                              );
+                            })}
+                          </div>
+                        )}
+                        <div className="flex gap-2">
+                          <button
+                            type="button"
+                            onTouchEnd={(e) => { e.preventDefault(); closePicker(exchange._id); }}
+                            onClick={() => closePicker(exchange._id)}
+                            className="flex-1 text-xs py-2.5 border border-gray-300 rounded-lg bg-white font-medium"
+                          >
+                            Cancel
+                          </button>
+                          <button
+                            type="button"
+                            onTouchEnd={(e) => { e.preventDefault(); if (selDates.length > 0 && !responding) submitAvailable(exchange); }}
+                            onClick={() => submitAvailable(exchange)}
+                            disabled={selDates.length === 0 || !!responding}
+                            className="flex-1 text-xs py-2.5 bg-green-600 disabled:bg-green-300 text-white rounded-lg font-medium"
+                          >
+                            {responding === exchange._id + 'available' ? 'Saving…' : 'Confirm' + (selDates.length > 0 ? ' (' + selDates.length + ')' : '')}
+                          </button>
+                        </div>
+                      </div>
+                    )}
                   </div>
                 );
               })}
@@ -1069,23 +1197,34 @@ function ShiftExchangeTab({ user }) {
                             {responders.map((r) => (
                               <div
                                 key={r.employee?._id}
-                                className="flex items-center gap-2 bg-green-50 border border-green-200 rounded-lg px-3 py-1.5"
+                                className="bg-green-50 border border-green-200 rounded-lg px-3 py-2"
                               >
-                                <div
-                                  className="w-5 h-5 rounded-full flex items-center justify-center text-white text-xs font-bold flex-shrink-0"
-                                  style={{ backgroundColor: r.employee?.color || '#22c55e' }}
-                                >
-                                  {r.employee?.name?.split(' ').map((n) => n[0]).join('').slice(0, 2)}
-                                </div>
-                                <span className="text-xs font-medium text-gray-800">{r.employee?.name}</span>
-                                {isAdmin && (
-                                  <button
-                                    onClick={() => handleApprove(exchange._id, r.employee._id)}
-                                    disabled={!!approving}
-                                    className="ml-1 text-xs bg-green-600 hover:bg-green-700 disabled:opacity-50 text-white px-2 py-0.5 rounded font-medium"
+                                <div className="flex items-center gap-2">
+                                  <div
+                                    className="w-5 h-5 rounded-full flex items-center justify-center text-white text-xs font-bold flex-shrink-0"
+                                    style={{ backgroundColor: r.employee?.color || '#22c55e' }}
                                   >
-                                    {approving === exchange._id + r.employee._id ? '…' : 'Approve'}
-                                  </button>
+                                    {r.employee?.name?.split(' ').map((n) => n[0]).join('').slice(0, 2)}
+                                  </div>
+                                  <span className="text-xs font-medium text-gray-800">{r.employee?.name}</span>
+                                  {isAdmin && (
+                                    <button
+                                      onClick={() => handleApprove(exchange._id, r.employee._id)}
+                                      disabled={!!approving}
+                                      className="ml-1 text-xs bg-green-600 hover:bg-green-700 disabled:opacity-50 text-white px-2 py-0.5 rounded font-medium"
+                                    >
+                                      {approving === exchange._id + r.employee._id ? '…' : 'Approve'}
+                                    </button>
+                                  )}
+                                </div>
+                                {r.availableDates?.length > 0 && (
+                                  <div className="flex flex-wrap gap-1 mt-1.5">
+                                    {r.availableDates.map((d) => (
+                                      <span key={d} className="text-[10px] bg-white text-green-700 border border-green-300 px-1.5 py-0.5 rounded">
+                                        {format(parseISO(d + 'T00:00:00'), 'MMM d')}
+                                      </span>
+                                    ))}
+                                  </div>
                                 )}
                               </div>
                             ))}
@@ -1100,313 +1239,296 @@ function ShiftExchangeTab({ user }) {
           </div>
         )}
       </div>
+
     </div>
   );
 }
 
-// ── Overview tab (original dashboard content) ─────────────────────────────────
-function OverviewTab({ user, todayShifts, weekShifts, employees, conversations }) {
-  const [myShifts, setMyShifts] = useState(() =>
-    todayShifts.filter((s) => s.employee?._id === user?._id || s.employee === user?._id)
-  );
-  const [clockLoading, setClockLoading] = useState(null);
+// ── Overview tab (admin / manager / charge RN only) ───────────────────────────
+function OverviewTab({ user }) {
+  const [weekOffset, setWeekOffset] = useState(0); // 0 = current week, 1 = next, etc.
+  const [weekShifts, setWeekShifts] = useState([]);
+  const [loadingWeek, setLoadingWeek] = useState(true);
 
-  const handleClockIn = async (shiftId) => {
-    setClockLoading(shiftId);
-    try {
-      const res = await schedulesAPI.clockIn(shiftId);
-      setMyShifts((prev) => prev.map((s) => (s._id === shiftId ? { ...s, ...res.data } : s)));
-    } catch (err) {
-      console.error('Clock in failed', err);
-    } finally {
-      setClockLoading(null);
-    }
-  };
+  const baseWeekStart = startOfWeek(new Date(), { weekStartsOn: 0 });
+  const weekStart = addWeeks(baseWeekStart, weekOffset);
+  const weekEnd = endOfWeek(weekStart, { weekStartsOn: 0 });
+  const weekDays = eachDayOfInterval({ start: weekStart, end: weekEnd });
+  const today = format(new Date(), 'yyyy-MM-dd');
 
-  const handleClockOut = async (shiftId) => {
-    setClockLoading(shiftId);
-    try {
-      const res = await schedulesAPI.clockOut(shiftId);
-      setMyShifts((prev) => prev.map((s) => (s._id === shiftId ? { ...s, ...res.data } : s)));
-    } catch (err) {
-      console.error('Clock out failed', err);
-    } finally {
-      setClockLoading(null);
-    }
-  };
+  useEffect(() => {
+    setLoadingWeek(true);
+    schedulesAPI.getShifts({
+      startDate: format(weekStart, 'yyyy-MM-dd'),
+      endDate: format(weekEnd, 'yyyy-MM-dd'),
+    }).then((res) => setWeekShifts(res.data || []))
+      .finally(() => setLoadingWeek(false));
+  }, [weekOffset]);
 
-  const stats = [
-    {
-      label: 'Shifts Today',
-      value: todayShifts.length,
-      icon: Calendar,
-      color: 'bg-blue-500',
-      sub: `${myShifts.length} assigned to you`,
-    },
-    {
-      label: 'This Week',
-      value: weekShifts.length,
-      icon: TrendingUp,
-      color: 'bg-green-500',
-      sub: 'Total shifts scheduled',
-    },
-    {
-      label: 'Team Members',
-      value: employees.length,
-      icon: Users,
-      color: 'bg-purple-500',
-      sub: `${employees.filter((e) => e.isOnline).length} online now`,
-    },
-    {
-      label: 'Messages',
-      value: conversations.length,
-      icon: MessageCircle,
-      color: 'bg-orange-500',
-      sub: 'Active conversations',
-    },
-  ];
+  // Build map: date → position → count
+  const weekMap = {};
+  const positionSet = new Set();
+  weekShifts.forEach((shift) => {
+    const pos = shift.position || shift.employee?.position || 'Unassigned';
+    positionSet.add(pos);
+    if (!weekMap[shift.date]) weekMap[shift.date] = {};
+    weekMap[shift.date][pos] = (weekMap[shift.date][pos] || 0) + 1;
+  });
+  const positions = Array.from(positionSet).sort();
 
   return (
-    <>
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
-        {stats.map(({ label, value, icon: Icon, color, sub }) => (
-          <div key={label} className="bg-white rounded-xl p-5 shadow-sm border border-gray-100">
-            <div className="flex items-center justify-between mb-3">
-              <div className={`${color} p-2 rounded-lg`}>
-                <Icon className="h-5 w-5 text-white" />
-              </div>
-              <span className="text-3xl font-bold text-gray-900">{value}</span>
-            </div>
-            <p className="font-semibold text-gray-700">{label}</p>
-            <p className="text-xs text-gray-500 mt-0.5">{sub}</p>
+    <div className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
+      {/* Header with week navigation */}
+      <div className="flex items-center justify-between px-5 py-4 border-b border-gray-100">
+        <div className="flex items-center gap-2">
+          <div className="bg-blue-500 p-2 rounded-lg">
+            <Users className="h-4 w-4 text-white" />
           </div>
-        ))}
+          <div>
+            <p className="font-semibold text-gray-900">Staff Working</p>
+            <p className="text-xs text-gray-400">
+              {format(weekStart, 'MMM d')} – {format(weekEnd, 'MMM d, yyyy')}
+            </p>
+          </div>
+        </div>
+        <div className="flex items-center gap-1">
+          <button
+            type="button"
+            onClick={() => setWeekOffset((n) => n - 1)}
+            className="p-2 rounded-lg hover:bg-gray-100 text-gray-500"
+          >
+            <ChevronRight className="h-4 w-4 rotate-180" />
+          </button>
+          {weekOffset !== 0 && (
+            <button
+              type="button"
+              onClick={() => setWeekOffset(0)}
+              className="text-xs px-2 py-1 rounded-lg bg-blue-50 text-blue-600 font-medium"
+            >
+              Today
+            </button>
+          )}
+          <button
+            type="button"
+            onClick={() => setWeekOffset((n) => n + 1)}
+            className="p-2 rounded-lg hover:bg-gray-100 text-gray-500"
+          >
+            <ChevronRight className="h-4 w-4" />
+          </button>
+        </div>
       </div>
 
-      {/* My Shifts Today — clock-in/out widget */}
-      {myShifts.length > 0 && (
-        <div className="bg-white rounded-xl shadow-sm border border-gray-100 mb-6">
-          <div className="flex items-center gap-2 p-5 border-b border-gray-100">
-            <Clock className="h-4 w-4 text-blue-600" />
-            <h2 className="font-semibold text-gray-900">My Shifts Today</h2>
-          </div>
-          <div className="divide-y divide-gray-50">
-            {myShifts.map((shift) => {
-              const isBusy = clockLoading === shift._id;
-              const clockInTime = shift.clockIn ? format(new Date(shift.clockIn), 'h:mm a') : null;
-              const clockOutTime = shift.clockOut ? format(new Date(shift.clockOut), 'h:mm a') : null;
-              return (
-                <div key={shift._id} className="flex flex-wrap items-center justify-between gap-3 px-5 py-3">
-                  <div>
-                    <p className="font-medium text-sm text-gray-900">
-                      {to12h(shift.startTime)} – {to12h(shift.endTime)}
-                    </p>
-                    <p className="text-xs text-gray-500">{shift.position || shift.department || 'No position'}</p>
-                    {clockInTime && (
-                      <p className="text-xs text-green-600 mt-0.5">
-                        Clocked in: {clockInTime}
-                        {clockOutTime && ` · Out: ${clockOutTime}`}
-                      </p>
-                    )}
-                  </div>
-                  <div className="flex items-center gap-2">
-                    {!shift.clockIn && (
-                      <button
-                        onClick={() => handleClockIn(shift._id)}
-                        disabled={isBusy}
-                        className="flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium bg-green-600 hover:bg-green-700 disabled:opacity-50 text-white rounded-lg transition-colors"
-                      >
-                        {isBusy ? <span className="animate-spin rounded-full h-3 w-3 border-b-2 border-white" /> : <LogIn className="h-3.5 w-3.5" />}
-                        Clock In
-                      </button>
-                    )}
-                    {shift.clockIn && !shift.clockOut && (
-                      <button
-                        onClick={() => handleClockOut(shift._id)}
-                        disabled={isBusy}
-                        className="flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium bg-red-600 hover:bg-red-700 disabled:opacity-50 text-white rounded-lg transition-colors"
-                      >
-                        {isBusy ? <span className="animate-spin rounded-full h-3 w-3 border-b-2 border-white" /> : <LogOut className="h-3.5 w-3.5" />}
-                        Clock Out
-                      </button>
-                    )}
-                    {shift.clockIn && shift.clockOut && (
-                      <span className="text-xs font-semibold px-2.5 py-1 rounded-full bg-green-100 text-green-700">
-                        Completed
-                      </span>
-                    )}
-                  </div>
-                </div>
-              );
-            })}
-          </div>
+      {loadingWeek ? (
+        <div className="p-4 space-y-3">
+          {[1,2,3,4].map((i) => (
+            <div key={i} className="flex items-center gap-3">
+              <div className="h-3.5 w-28 bg-gray-200 rounded animate-pulse" />
+              {[1,2,3,4,5,6,7].map((j) => <div key={j} className="h-6 w-6 rounded-full bg-gray-200 animate-pulse flex-1" />)}
+            </div>
+          ))}
+        </div>
+      ) : positions.length === 0 ? (
+        <p className="text-sm text-gray-400 text-center py-10">No shifts scheduled this week</p>
+      ) : (
+        <div className="overflow-x-auto">
+          <table className="w-full text-xs">
+            <thead>
+              <tr className="bg-gray-50 border-b border-gray-100">
+                <th className="text-left px-4 py-2.5 font-semibold text-gray-500 w-32">Position</th>
+                {weekDays.map((d) => {
+                  const str = format(d, 'yyyy-MM-dd');
+                  const isToday = str === today;
+                  return (
+                    <th key={str} className={`text-center px-2 py-2.5 font-semibold min-w-[52px] ${isToday ? 'text-blue-600' : 'text-gray-500'}`}>
+                      <div>{format(d, 'EEE')}</div>
+                      <div className={`text-[10px] font-normal ${isToday ? 'text-blue-400' : 'text-gray-400'}`}>{format(d, 'M/d')}</div>
+                    </th>
+                  );
+                })}
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-gray-50">
+              {positions.map((pos) => (
+                <tr key={pos} className="hover:bg-gray-50">
+                  <td className="px-4 py-2.5 font-medium text-gray-700">{pos}</td>
+                  {weekDays.map((d) => {
+                    const str = format(d, 'yyyy-MM-dd');
+                    const isToday = str === today;
+                    const count = (weekMap[str] && weekMap[str][pos]) || 0;
+                    return (
+                      <td key={str} className={`text-center px-2 py-2.5 ${isToday ? 'bg-blue-50' : ''}`}>
+                        {count === 0 ? (
+                          <span className="text-gray-300">—</span>
+                        ) : (
+                          <span className={`inline-flex items-center justify-center w-6 h-6 rounded-full text-xs font-bold
+                            ${count >= 3 ? 'bg-green-100 text-green-700' : count === 2 ? 'bg-yellow-100 text-yellow-700' : 'bg-red-100 text-red-600'}`}>
+                            {count}
+                          </span>
+                        )}
+                      </td>
+                    );
+                  })}
+                </tr>
+              ))}
+            </tbody>
+          </table>
         </div>
       )}
-
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        {/* Today's Shifts */}
-        <div className="bg-white rounded-xl shadow-sm border border-gray-100">
-          <div className="flex items-center justify-between p-5 border-b border-gray-100">
-            <h2 className="font-semibold text-gray-900 flex items-center gap-2">
-              <Calendar className="h-4 w-4 text-blue-600" />
-              Today&apos;s Shifts
-            </h2>
-            <Link to="/schedule" className="text-sm text-blue-600 hover:underline flex items-center gap-1">
-              View all <ChevronRight className="h-3 w-3" />
-            </Link>
-          </div>
-          <div className="divide-y divide-gray-50">
-            {todayShifts.length === 0 ? (
-              <p className="text-gray-400 text-sm text-center py-8">No shifts scheduled today</p>
-            ) : (
-              todayShifts.slice(0, 6).map((shift) => (
-                <div key={shift._id} className="flex items-center gap-3 px-5 py-3">
-                  <div
-                    className="w-9 h-9 rounded-full flex items-center justify-center text-white text-xs font-bold flex-shrink-0"
-                    style={{ backgroundColor: shift.employee?.color || '#3B82F6' }}
-                  >
-                    {shift.employee?.name?.split(' ').map((n) => n[0]).join('').slice(0, 2)}
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <p className="font-medium text-sm text-gray-900 truncate">{shift.employee?.name}</p>
-                    <p className="text-xs text-gray-500">{shift.position || shift.employee?.position}</p>
-                  </div>
-                  <div className="text-right">
-                    <p className="text-sm font-medium text-gray-700 flex items-center gap-1">
-                      <Clock className="h-3 w-3" />
-                      {shift.startTime} – {shift.endTime}
-                    </p>
-                    <span
-                      className={`text-xs px-2 py-0.5 rounded-full ${
-                        shift.status === 'confirmed'
-                          ? 'bg-green-100 text-green-700'
-                          : shift.status === 'cancelled'
-                          ? 'bg-red-100 text-red-700'
-                          : 'bg-blue-100 text-blue-700'
-                      }`}
-                    >
-                      {shift.status}
-                    </span>
-                  </div>
-                </div>
-              ))
-            )}
-          </div>
-        </div>
-
-        {/* Recent Messages */}
-        <div className="bg-white rounded-xl shadow-sm border border-gray-100">
-          <div className="flex items-center justify-between p-5 border-b border-gray-100">
-            <h2 className="font-semibold text-gray-900 flex items-center gap-2">
-              <MessageCircle className="h-4 w-4 text-blue-600" />
-              Recent Messages
-            </h2>
-            <Link to="/messages" className="text-sm text-blue-600 hover:underline flex items-center gap-1">
-              Open <ChevronRight className="h-3 w-3" />
-            </Link>
-          </div>
-          <div className="divide-y divide-gray-50">
-            {conversations.length === 0 ? (
-              <p className="text-gray-400 text-sm text-center py-8">No conversations yet</p>
-            ) : (
-              conversations.map((conv) => {
-                const other = conv.participants?.find((p) => p._id !== user?._id);
-                const name = conv.isGroup ? conv.name : other?.name || 'Unknown';
-                const initials = name?.split(' ').map((n) => n[0]).join('').slice(0, 2).toUpperCase();
-                return (
-                  <Link
-                    key={conv._id}
-                    to="/messages"
-                    className="flex items-center gap-3 px-5 py-3 hover:bg-gray-50 transition-colors"
-                  >
-                    <div className="relative">
-                      <div
-                        className="w-10 h-10 rounded-full flex items-center justify-center text-white text-sm font-bold"
-                        style={{ backgroundColor: other?.color || '#6B7280' }}
-                      >
-                        {initials}
-                      </div>
-                      {other?.isOnline && (
-                        <span className="absolute bottom-0 right-0 w-2.5 h-2.5 bg-green-500 rounded-full border-2 border-white" />
-                      )}
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <p className="font-medium text-sm text-gray-900">{name}</p>
-                      <p className="text-xs text-gray-500 truncate">
-                        {conv.lastMessage?.content || 'Start a conversation'}
-                      </p>
-                    </div>
-                  </Link>
-                );
-              })
-            )}
-          </div>
-        </div>
-      </div>
-    </>
+    </div>
   );
+}
+
+function daysUntil(dateStr) {
+  if (!dateStr) return null;
+  return Math.round((new Date(dateStr + 'T00:00:00') - new Date(new Date().toDateString())) / 86400000);
+}
+
+function expiryColor(days) {
+  if (days === null) return null;
+  if (days < 0)   return 'bg-red-100 text-red-700 border-red-200';
+  if (days <= 7)  return 'bg-red-100 text-red-700 border-red-200';
+  if (days <= 14) return 'bg-orange-100 text-orange-700 border-orange-200';
+  if (days <= 60) return 'bg-amber-100 text-amber-700 border-amber-200';
+  return null; // don't show if plenty of time
+}
+
+function expiryLabel(days) {
+  if (days === null) return '';
+  if (days < 0)  return 'Expired';
+  if (days === 0) return 'Expires today';
+  return `${days}d`;
 }
 
 // ── Dashboard page ────────────────────────────────────────────────────────────
 export default function Dashboard() {
   const { user } = useAuth();
-  const [activeTab, setActiveTab] = useState('overview');
-  const [todayShifts, setTodayShifts] = useState([]);
-  const [weekShifts, setWeekShifts] = useState([]);
-  const [employees, setEmployees] = useState([]);
-  const [conversations, setConversations] = useState([]);
+  const { socket } = useSocket();
+  const [expiryItems, setExpiryItems] = useState([]);
+
+  const isPrivileged = PRIVILEGED_ROLES.includes(user?.role);
+  const tabs = ALL_TABS.filter((t) => !t.privileged || isPrivileged);
+
+  const [activeTab, setActiveTab] = useState(() => isPrivileged ? 'overview' : 'shiftexchange');
   const [pendingCorrections, setPendingCorrections] = useState(0);
   const [pendingTimeOff, setPendingTimeOff] = useState(0);
+  const [pendingExchanges, setPendingExchanges] = useState(0);
   const [loading, setLoading] = useState(true);
 
   const isAdmin = user?.role === 'admin' || user?.role === 'manager';
 
   useEffect(() => {
-    const today = format(new Date(), 'yyyy-MM-dd');
-    const weekStart = format(startOfWeek(new Date(), { weekStartsOn: 0 }), 'yyyy-MM-dd');
-    const weekEnd = format(endOfWeek(new Date(), { weekStartsOn: 0 }), 'yyyy-MM-dd');
-
     Promise.all([
-      schedulesAPI.getShifts({ startDate: today, endDate: today }),
-      schedulesAPI.getShifts({ startDate: weekStart, endDate: weekEnd }),
-      usersAPI.getAll(),
-      messagesAPI.getConversations(),
       timeCorrectionAPI.getAll({ status: 'pending' }),
       schedulesAPI.getTimeOff({ status: 'pending' }),
+      exchangeAPI.getAll(),
+      profileAPI.get(),
     ])
-      .then(([todayRes, weekRes, empRes, convRes, corrRes, toRes]) => {
-        setTodayShifts(todayRes.data);
-        setWeekShifts(weekRes.data);
-        setEmployees(empRes.data);
-        setConversations(convRes.data.slice(0, 5));
+      .then(([corrRes, toRes, exchRes, profileRes]) => {
         setPendingCorrections(corrRes.data.length);
         setPendingTimeOff(toRes.data.length);
+        const exchData = exchRes.data;
+        const openCount = isAdmin
+          ? (exchData.requests || []).filter((e) => e.status === 'open').length
+          : (exchData.available || []).length;
+        setPendingExchanges(openCount);
+
+        const p = profileRes.data;
+        const items = [
+          { label: 'License', expiry: p.licenseExpiry },
+          { label: 'BLS/CPR', expiry: p.blsCprExpiry },
+          ...(p.certifications || []).map((c) => ({ label: c.name, expiry: c.expiry })),
+        ]
+          .filter((item) => item.expiry)
+          .map((item) => ({ ...item, days: daysUntil(item.expiry) }))
+          .filter((item) => item.days !== null && item.days <= 60)
+          .sort((a, b) => a.days - b.days);
+        setExpiryItems(items);
       })
       .finally(() => setLoading(false));
   }, []);
 
+  // Real-time badge update when a new exchange request comes in
+  useEffect(() => {
+    if (!socket) return;
+    const handler = () => setPendingExchanges((n) => n + 1);
+    socket.on('shiftExchangeNew', handler);
+    return () => socket.off('shiftExchangeNew', handler);
+  }, [socket]);
+
+  // Clear exchange badge when user opens the tab
+  useEffect(() => {
+    if (activeTab === 'shiftexchange') setPendingExchanges(0);
+  }, [activeTab]);
+
   if (loading) {
     return (
-      <div className="flex items-center justify-center h-64">
-        <div className="animate-spin rounded-full h-10 w-10 border-b-2 border-blue-600" />
+      <div className="p-6 max-w-7xl mx-auto space-y-4">
+        <div className="h-8 w-48 bg-gray-200 rounded animate-pulse" />
+        <div className="h-4 w-36 bg-gray-200 rounded animate-pulse" />
+        <div className="flex gap-2 mt-6">
+          {[1,2,3].map((i) => <div key={i} className="h-9 w-28 bg-gray-200 rounded-lg animate-pulse" />)}
+        </div>
+        <div className="bg-white rounded-xl border border-gray-100 p-4 space-y-3 mt-4">
+          {[1,2,3,4].map((i) => <div key={i} className="flex gap-3 items-center"><div className="w-9 h-9 rounded-full bg-gray-200 animate-pulse" /><div className="flex-1 space-y-2"><div className="h-3.5 w-32 bg-gray-200 rounded animate-pulse" /><div className="h-3 w-20 bg-gray-200 rounded animate-pulse" /></div></div>)}
+        </div>
       </div>
     );
   }
 
   return (
     <div className="p-6 max-w-7xl mx-auto">
-      {/* Greeting */}
-      <div className="mb-5">
-        <h1 className="text-2xl font-bold text-gray-900">
-          Good {new Date().getHours() < 12 ? 'morning' : new Date().getHours() < 17 ? 'afternoon' : 'evening'},{' '}
-          {user?.name?.split(' ')[0]}!
-        </h1>
-        <p className="text-gray-500 mt-1">{format(new Date(), 'EEEE, MMMM d, yyyy')}</p>
-      </div>
+      {/* Profile card + greeting */}
+      <Link to="/profile" className="flex items-center gap-4 bg-white dark:bg-gray-900 rounded-2xl border border-gray-100 dark:border-gray-700 shadow-sm px-5 py-4 mb-5 hover:shadow-md transition-shadow group">
+        <div
+          className="w-14 h-14 rounded-full flex items-center justify-center text-white text-lg font-bold flex-shrink-0"
+          style={{ backgroundColor: user?.color || '#3B82F6' }}
+        >
+          {user?.avatar
+            ? <img src={user.avatar} alt="avatar" className="w-14 h-14 rounded-full object-cover" />
+            : user?.name?.split(' ').map((n) => n[0]).join('').slice(0, 2)}
+        </div>
+        <div className="flex-1 min-w-0">
+          <p className="text-xs text-gray-400 dark:text-gray-500">
+            Good {new Date().getHours() < 12 ? 'morning' : new Date().getHours() < 17 ? 'afternoon' : 'evening'}
+          </p>
+          <h1 className="text-xl font-bold text-gray-900 dark:text-white leading-tight truncate">
+            {user?.name}
+          </h1>
+          <div className="flex items-center gap-2 mt-0.5 flex-wrap">
+            <span className="text-xs text-gray-500 dark:text-gray-400 capitalize">{user?.role?.replace('_', ' ')}</span>
+            {user?.position && <>
+              <span className="text-gray-300 dark:text-gray-600">·</span>
+              <span className="text-xs text-gray-500 dark:text-gray-400">{user.position}</span>
+            </>}
+            {user?.department && <>
+              <span className="text-gray-300 dark:text-gray-600">·</span>
+              <span className="text-xs font-semibold px-2 py-0.5 bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-400 rounded-full">{user.department}</span>
+            </>}
+          </div>
+          {expiryItems.length > 0 && (
+            <div className="flex flex-wrap gap-1.5 mt-2">
+              {expiryItems.map((item, i) => {
+                const cls = expiryColor(item.days);
+                if (!cls) return null;
+                return (
+                  <span key={i} className={`inline-flex items-center gap-1 text-[10px] font-semibold px-2 py-0.5 rounded-full border ${cls}`}>
+                    {item.label}: {expiryLabel(item.days)}
+                  </span>
+                );
+              })}
+            </div>
+          )}
+        </div>
+        <div className="flex items-center gap-1 text-xs text-blue-500 font-medium opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0">
+          <UserCircle className="h-4 w-4" />
+          <span className="hidden sm:inline">View Profile</span>
+          <ChevronRight className="h-3.5 w-3.5" />
+        </div>
+      </Link>
 
       {/* Tabs */}
       <div className="flex items-center gap-1 border-b border-gray-200 mb-6">
-        {TABS.map(({ key, label }) => (
+        {tabs.map(({ key, label }) => (
           <button
             key={key}
             onClick={() => setActiveTab(key)}
@@ -1417,6 +1539,11 @@ export default function Dashboard() {
             }`}
           >
             {label}
+            {key === 'shiftexchange' && pendingExchanges > 0 && (
+              <span className="ml-1.5 bg-orange-500 text-white text-xs font-bold px-1.5 py-0.5 rounded-full">
+                {pendingExchanges}
+              </span>
+            )}
             {key === 'timeoff' && isAdmin && pendingTimeOff > 0 && (
               <span className="ml-1.5 bg-yellow-400 text-white text-xs font-bold px-1.5 py-0.5 rounded-full">
                 {pendingTimeOff}
@@ -1431,25 +1558,13 @@ export default function Dashboard() {
         ))}
       </div>
 
-      {/* Tab content */}
-      {activeTab === 'overview' && (
-        <OverviewTab
-          user={user}
-          todayShifts={todayShifts}
-          weekShifts={weekShifts}
-          employees={employees}
-          conversations={conversations}
-        />
-      )}
-      {activeTab === 'shiftexchange' && (
-        <ShiftExchangeTab user={user} />
-      )}
-      {activeTab === 'timeoff' && (
-        <TimeOffTab user={user} />
-      )}
-      {activeTab === 'timecorrection' && (
-        <TimeCorrectionTab user={user} />
-      )}
+      {/* Tab content — key forces remount + fade-in on tab change */}
+      <div key={activeTab} className="animate-fade-in">
+        {activeTab === 'overview' && <OverviewTab user={user} />}
+        {activeTab === 'shiftexchange' && <ShiftExchangeTab user={user} />}
+        {activeTab === 'timeoff' && <TimeOffTab user={user} />}
+        {activeTab === 'timecorrection' && <TimeCorrectionTab user={user} />}
+      </div>
     </div>
   );
 }

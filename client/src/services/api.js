@@ -12,10 +12,20 @@ api.interceptors.request.use((config) => {
 
 api.interceptors.response.use(
   (res) => res,
-  (err) => {
+  async (err) => {
+    const config = err.config;
+    // Retry network errors (no response) up to 2 times, with backoff
+    if (!err.response && config && !config._retryCount) {
+      config._retryCount = 0;
+    }
+    if (!err.response && config && config._retryCount < 2) {
+      config._retryCount += 1;
+      await new Promise((r) => setTimeout(r, 500 * config._retryCount));
+      return api(config);
+    }
     if (err.response?.status === 401) {
       localStorage.removeItem('token');
-      window.location.href = '/login';
+      window.dispatchEvent(new Event('session-expired'));
     }
     return Promise.reject(err);
   }
@@ -45,9 +55,7 @@ export const schedulesAPI = {
   createShiftsBulk: (data) => api.post('/schedules/shifts/bulk', data),
   updateShift: (id, data) => api.put(`/schedules/shifts/${id}`, data),
   deleteShift: (id) => api.delete(`/schedules/shifts/${id}`),
-  clockIn: (id) => api.patch(`/schedules/shifts/${id}/clock-in`),
-  clockOut: (id) => api.patch(`/schedules/shifts/${id}/clock-out`),
-  getTimeOff: (params) => api.get('/schedules/timeoff', { params }),
+getTimeOff: (params) => api.get('/schedules/timeoff', { params }),
   requestTimeOff: (data) => api.post('/schedules/timeoff', data),
   reviewTimeOff: (id, data) => api.patch(`/schedules/timeoff/${id}`, data),
   deleteTimeOff: (id) => api.delete(`/schedules/timeoff/${id}`),
@@ -74,6 +82,8 @@ export const messagesAPI = {
     api.get(`/messages/conversations/${convId}/messages`, { params: { page } }),
   sendMessage: (convId, data) => api.post(`/messages/conversations/${convId}/messages`, data),
   deleteMessage: (id) => api.delete(`/messages/messages/${id}`),
+  getUnreadCount: () => api.get('/messages/unread-count'),
+  markAllRead: () => api.post('/messages/mark-all-read'),
 };
 
 export const exchangeAPI = {
@@ -98,6 +108,37 @@ export const timeCorrectionAPI = {
   submit: (data) => api.post('/timecorrections', data),
   review: (id, data) => api.patch(`/timecorrections/${id}`, data),
   delete: (id) => api.delete(`/timecorrections/${id}`),
+};
+
+export const announcementsAPI = {
+  getAll: () => api.get('/announcements'),
+  create: (data) => api.post('/announcements', data),
+  pin: (id, pinned) => api.patch(`/announcements/${id}/pin`, { pinned }),
+  delete: (id) => api.delete(`/announcements/${id}`),
+};
+
+export const openShiftsAPI = {
+  getAll: (params) => api.get('/open-shifts', { params }),
+  create: (data) => api.post('/open-shifts', data),
+  claim: (id) => api.post(`/open-shifts/${id}/claim`),
+  approve: (id, employeeId) => api.patch(`/open-shifts/${id}/approve`, { employeeId }),
+  cancel: (id) => api.delete(`/open-shifts/${id}`),
+};
+
+export const recurringShiftsAPI = {
+  getAll: () => api.get('/recurring-shifts'),
+  create: (data) => api.post('/recurring-shifts', data),
+  generate: (data) => api.post('/recurring-shifts/generate', data),
+  delete: (id) => api.delete(`/recurring-shifts/${id}`),
+};
+
+export const profileAPI = {
+  get: () => api.get('/profile'),
+  getById: (id) => api.get(`/profile/${id}`),
+  update: (data) => api.patch('/profile', data),
+  uploadDocument: (formData) => api.post('/profile/documents', formData, { headers: { 'Content-Type': 'multipart/form-data' } }),
+  deleteDocument: (filename) => api.delete(`/profile/documents/${filename}`),
+  getIcalToken: () => api.get('/profile/ical-token'),
 };
 
 export default api;

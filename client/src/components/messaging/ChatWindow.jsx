@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { format, isToday, isYesterday } from 'date-fns';
-import { Send, Users, Phone, MoreVertical, ArrowLeft, Check, CheckCheck, Smile, CornerUpLeft, X } from 'lucide-react';
+import { Send, Users, ArrowLeft, Check, CheckCheck, Smile, CornerUpLeft, X, Camera, ImageIcon } from 'lucide-react';
 import { messagesAPI } from '../../services/api';
 import { useAuth } from '../../contexts/AuthContext';
 import { useSocket } from '../../contexts/SocketContext';
@@ -30,6 +30,51 @@ function EmojiPicker({ onSelect }) {
   );
 }
 
+// Resize an image File/Blob to max 900px wide, returns JPEG data URL
+function resizeImage(file) {
+  return new Promise((resolve) => {
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      const img = new Image();
+      img.onload = () => {
+        const MAX = 900;
+        const scale = img.width > MAX ? MAX / img.width : 1;
+        const canvas = document.createElement('canvas');
+        canvas.width  = Math.round(img.width  * scale);
+        canvas.height = Math.round(img.height * scale);
+        canvas.getContext('2d').drawImage(img, 0, 0, canvas.width, canvas.height);
+        resolve(canvas.toDataURL('image/jpeg', 0.82));
+      };
+      img.src = e.target.result;
+    };
+    reader.readAsDataURL(file);
+  });
+}
+
+// Render text with clickable links
+function MessageText({ content, isMine }) {
+  const parts = content.split(/(https?:\/\/[^\s]+)/g);
+  return (
+    <p className="whitespace-pre-wrap break-words">
+      {parts.map((part, i) =>
+        /^https?:\/\//.test(part) ? (
+          <a
+            key={i}
+            href={part}
+            target="_blank"
+            rel="noopener noreferrer"
+            className={`underline break-all ${isMine ? 'text-blue-100 hover:text-white' : 'text-blue-600 hover:text-blue-800'}`}
+          >
+            {part}
+          </a>
+        ) : (
+          <span key={i}>{part}</span>
+        )
+      )}
+    </p>
+  );
+}
+
 const formatMsgTime = (d) => format(new Date(d), 'HH:mm');
 const formatDateDivider = (d) => {
   const date = new Date(d);
@@ -45,7 +90,7 @@ const shouldShowDateDivider = (messages, index) => {
   return prev.toDateString() !== curr.toDateString();
 };
 
-export default function ChatWindow({ conversation, onBack }) {
+export default function ChatWindow({ conversation, onBack, onClose }) {
   const { user } = useAuth();
   const { getSocket, onlineUsers } = useSocket();
   const [messages, setMessages] = useState([]);
@@ -55,10 +100,13 @@ export default function ChatWindow({ conversation, onBack }) {
   const [sending, setSending] = useState(false);
   const [showEmoji, setShowEmoji] = useState(false);
   const [replyingTo, setReplyingTo] = useState(null);
+  const [imagePreview, setImagePreview] = useState(null);
   const bottomRef = useRef(null);
   const typingTimeoutRef = useRef(null);
   const emojiRef = useRef(null);
   const textareaRef = useRef(null);
+  const fileInputRef = useRef(null);
+  const cameraInputRef = useRef(null);
 
   // Close emoji picker on outside click
   useEffect(() => {
@@ -80,6 +128,27 @@ export default function ChatWindow({ conversation, onBack }) {
       el.setSelectionRange(start + emoji.length, start + emoji.length);
     });
   };
+
+  // Handle image paste from clipboard
+  const handlePaste = async (e) => {
+    const items = Array.from(e.clipboardData?.items || []);
+    const imageItem = items.find((item) => item.type.startsWith('image/'));
+    if (!imageItem) return;
+    e.preventDefault();
+    const file = imageItem.getAsFile();
+    const dataUrl = await resizeImage(file);
+    setImagePreview(dataUrl);
+  };
+
+  // Handle image file selected from gallery or camera
+  const handleFileChange = async (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const dataUrl = await resizeImage(file);
+    setImagePreview(dataUrl);
+    e.target.value = '';
+  };
+
 
   const other = !conversation.isGroup
     ? conversation.participants?.find((p) => p._id !== user?._id)
@@ -168,6 +237,40 @@ export default function ChatWindow({ conversation, onBack }) {
 
   const sendMessage = async (e) => {
     e?.preventDefault();
+
+    // ── Image send ──
+    if (imagePreview) {
+      const dataUrl = imagePreview;
+      setImagePreview(null);
+      setSending(true);
+      const tempMsg = {
+        _id: `temp-${Date.now()}`,
+        content: dataUrl,
+        type: 'image',
+        sender: user,
+        createdAt: new Date().toISOString(),
+        readBy: [user._id],
+        _temp: true,
+      };
+      setMessages((prev) => [...prev, tempMsg]);
+      try {
+        const socket = getSocket();
+        if (socket?.connected) {
+          socket.emit('sendMessage', { conversationId: conversation._id, content: dataUrl, type: 'image' });
+        } else {
+          const res = await messagesAPI.sendMessage(conversation._id, { content: dataUrl, type: 'image' });
+          setMessages((prev) => prev.map((m) => (m._id === tempMsg._id ? res.data : m)));
+        }
+      } catch {
+        setMessages((prev) => prev.filter((m) => m._id !== tempMsg._id));
+        setImagePreview(dataUrl);
+      } finally {
+        setSending(false);
+      }
+      return;
+    }
+
+    // ── Text send ──
     const content = input.trim();
     if (!content || sending) return;
 
@@ -176,10 +279,10 @@ export default function ChatWindow({ conversation, onBack }) {
     setReplyingTo(null);
     setSending(true);
 
-    // Optimistic update
     const tempMsg = {
       _id: `temp-${Date.now()}`,
       content,
+      type: 'text',
       sender: user,
       createdAt: new Date().toISOString(),
       readBy: [user._id],
@@ -254,6 +357,11 @@ export default function ChatWindow({ conversation, onBack }) {
               : 'Offline'}
           </p>
         </div>
+        {onClose && (
+          <button onClick={onClose} className="p-1.5 hover:bg-gray-100 rounded-lg text-gray-500 flex-shrink-0">
+            <X className="h-5 w-5" />
+          </button>
+        )}
       </div>
 
       {/* Messages */}
@@ -315,7 +423,9 @@ export default function ChatWindow({ conversation, onBack }) {
                     ) : null}
 
                     <div
-                      className={`px-3 py-2 rounded-2xl text-sm ${
+                      className={`rounded-2xl text-sm overflow-hidden ${
+                        msg.type === 'image' ? 'p-0' : 'px-3 py-2'
+                      } ${
                         isMine
                           ? 'bg-blue-600 text-white rounded-br-sm'
                           : 'bg-white text-gray-900 shadow-sm border border-gray-100 rounded-bl-sm'
@@ -332,11 +442,20 @@ export default function ChatWindow({ conversation, onBack }) {
                             {msg.replyTo.sender?.name || 'Unknown'}
                           </p>
                           <p className="truncate opacity-80">
-                            {msg.replyTo.content || '…'}
+                            {msg.replyTo.type === 'image' ? '📷 Photo' : msg.replyTo.content || '…'}
                           </p>
                         </div>
                       )}
-                      <p className="whitespace-pre-wrap break-words">{msg.content}</p>
+                      {msg.type === 'image' ? (
+                        <img
+                          src={msg.content}
+                          alt="Sent image"
+                          className="max-w-[260px] max-h-[320px] object-cover rounded-2xl cursor-pointer"
+                          onClick={() => window.open(msg.content, '_blank')}
+                        />
+                      ) : (
+                        <MessageText content={msg.content} isMine={isMine} />
+                      )}
                     </div>
 
                     <div className={`flex items-center gap-1 mt-0.5 ${isMine ? 'flex-row-reverse' : ''}`}>
@@ -373,8 +492,22 @@ export default function ChatWindow({ conversation, onBack }) {
         <div ref={bottomRef} />
       </div>
 
+      {/* Hidden file inputs */}
+      <input ref={fileInputRef} type="file" accept="image/*" className="hidden" onChange={handleFileChange} />
+      <input ref={cameraInputRef} type="file" accept="image/*" capture="environment" className="hidden" onChange={handleFileChange} />
+
       {/* Input */}
       <div className="bg-white border-t border-gray-200">
+        {/* Image preview bar */}
+        {imagePreview && (
+          <div className="flex items-center gap-3 px-3 pt-2 pb-1 bg-gray-50 border-b border-gray-200">
+            <img src={imagePreview} alt="Preview" className="w-14 h-14 object-cover rounded-lg border border-gray-200 flex-shrink-0" />
+            <div className="flex-1 text-xs text-gray-500">Ready to send</div>
+            <button type="button" onClick={() => setImagePreview(null)} className="p-1 text-gray-400 hover:text-red-500 rounded-full hover:bg-gray-100">
+              <X className="h-4 w-4" />
+            </button>
+          </div>
+        )}
         {/* Reply preview bar */}
         {replyingTo && (
           <div className="flex items-center gap-2 px-3 pt-2 pb-1 bg-blue-50 border-b border-blue-100">
@@ -398,19 +531,40 @@ export default function ChatWindow({ conversation, onBack }) {
             <button
               type="button"
               onClick={() => setShowEmoji((v) => !v)}
-              className="w-10 h-10 flex items-center justify-center text-gray-400 hover:text-yellow-500 hover:bg-gray-100 rounded-full transition-colors"
+              className="w-9 h-9 flex items-center justify-center text-gray-400 hover:text-yellow-500 hover:bg-gray-100 rounded-full transition-colors"
             >
               <Smile className="h-5 w-5" />
             </button>
             {showEmoji && <EmojiPicker onSelect={insertEmoji} />}
           </div>
 
+          {/* Gallery picker */}
+          <button
+            type="button"
+            onClick={() => fileInputRef.current?.click()}
+            className="flex-shrink-0 w-9 h-9 flex items-center justify-center text-gray-400 hover:text-blue-500 hover:bg-gray-100 rounded-full transition-colors"
+            title="Send image"
+          >
+            <ImageIcon className="h-5 w-5" />
+          </button>
+
+          {/* Camera */}
+          <button
+            type="button"
+            onClick={() => cameraInputRef.current?.click()}
+            className="flex-shrink-0 w-9 h-9 flex items-center justify-center text-gray-400 hover:text-green-500 hover:bg-gray-100 rounded-full transition-colors"
+            title="Take photo"
+          >
+            <Camera className="h-5 w-5" />
+          </button>
+
           <textarea
             ref={textareaRef}
             value={input}
             onChange={handleInputChange}
             onKeyDown={handleKeyDown}
-            placeholder="Type a message..."
+            onPaste={handlePaste}
+            placeholder={imagePreview ? 'Image ready — press send' : 'Type a message...'}
             rows={1}
             className="flex-1 px-4 py-2.5 bg-gray-100 rounded-2xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none max-h-32 scrollbar-thin"
             style={{ height: 'auto' }}
@@ -421,7 +575,7 @@ export default function ChatWindow({ conversation, onBack }) {
           />
           <button
             type="submit"
-            disabled={!input.trim() || sending}
+            disabled={(!input.trim() && !imagePreview) || sending}
             className="flex-shrink-0 w-10 h-10 bg-blue-600 hover:bg-blue-700 disabled:bg-gray-300 text-white rounded-full flex items-center justify-center transition-colors"
           >
             <Send className="h-4 w-4" />
