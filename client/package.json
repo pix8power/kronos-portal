@@ -17,6 +17,7 @@
     "@capacitor/push-notifications": "^8.0.3",
     "axios": "^1.6.2",
     "date-fns": "^3.0.6",
+    "jimp": "^1.6.1",
     "jspdf": "^4.2.1",
     "jspdf-autotable": "^5.0.7",
     "lucide-react": "^0.309.0",

@@ -84,6 +84,8 @@ export const messagesAPI = {
   deleteMessage: (id) => api.delete(`/messages/messages/${id}`),
   getUnreadCount: () => api.get('/messages/unread-count'),
   markAllRead: () => api.post('/messages/mark-all-read'),
+  pinConversation: (id) => api.patch(`/messages/conversations/${id}/pin`),
+  deleteConversation: (id) => api.delete(`/messages/conversations/${id}`),
 };
 
 export const exchangeAPI = {

@@ -37,7 +37,7 @@ const baseNavItems = [
 export default function Navbar() {
   const { user, logout } = useAuth();
   const { activeDepartment, setActiveDepartment } = useAuth();
-  const { unreadMessages, clearUnreadMessages } = useSocket();
+  const { unreadMessages, clearUnreadMessages, unreadNotifications, clearUnreadNotifications } = useSocket();
   const { dark, toggle: toggleTheme } = useTheme();
   const location = useLocation();
   const navigate = useNavigate();
@@ -46,10 +46,14 @@ export default function Navbar() {
   const [deptOpen, setDeptOpen] = useState(false);
   const deptRef = useRef(null);
 
-  // Clear badge whenever on messages page (handles navigation + new messages arriving while already there)
+  // Clear badges when on the relevant page
   useEffect(() => {
     if (location.pathname === '/messages' && unreadMessages > 0) clearUnreadMessages();
   }, [location.pathname, unreadMessages, clearUnreadMessages]);
+
+  useEffect(() => {
+    if (location.pathname === '/' && unreadNotifications > 0) clearUnreadNotifications();
+  }, [location.pathname, unreadNotifications, clearUnreadNotifications]);
 
   // Close dept dropdown on outside click
   useEffect(() => {
@@ -106,6 +110,11 @@ export default function Navbar() {
                 {to === '/messages' && unreadMessages > 0 && (
                   <span className="absolute -top-0.5 -right-0.5 min-w-[16px] h-4 bg-red-500 text-white text-[9px] font-bold rounded-full flex items-center justify-center px-1 leading-none">
                     {unreadMessages > 9 ? '9+' : unreadMessages}
+                  </span>
+                )}
+                {to === '/' && unreadNotifications > 0 && (
+                  <span className="absolute -top-0.5 -right-0.5 min-w-[16px] h-4 bg-red-500 text-white text-[9px] font-bold rounded-full flex items-center justify-center px-1 leading-none">
+                    {unreadNotifications > 9 ? '9+' : unreadNotifications}
                   </span>
                 )}
               </Link>
@@ -233,6 +242,11 @@ export default function Navbar() {
               {to === '/messages' && unreadMessages > 0 && (
                 <span className="ml-auto min-w-[18px] h-[18px] bg-red-500 text-white text-[9px] font-bold rounded-full flex items-center justify-center px-1 leading-none">
                   {unreadMessages > 9 ? '9+' : unreadMessages}
+                </span>
+              )}
+              {to === '/' && unreadNotifications > 0 && (
+                <span className="ml-auto min-w-[18px] h-[18px] bg-red-500 text-white text-[9px] font-bold rounded-full flex items-center justify-center px-1 leading-none">
+                  {unreadNotifications > 9 ? '9+' : unreadNotifications}
                 </span>
               )}
             </Link>

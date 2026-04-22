@@ -16,12 +16,14 @@ const TYPE_COLORS = {
 };
 
 export default function NotificationBell() {
-  const { getSocket } = useSocket();
+  const { getSocket, unreadNotifications, setUnreadNotifications, clearUnreadNotifications } = useSocket();
   const navigate = useNavigate();
   const [open, setOpen] = useState(false);
   const [notifications, setNotifications] = useState([]);
-  const [unread, setUnread] = useState(0);
   const dropRef = useRef(null);
+
+  const unread = unreadNotifications;
+  const setUnread = setUnreadNotifications;
 
   const load = useCallback(async () => {
     try {
@@ -29,17 +31,16 @@ export default function NotificationBell() {
       setNotifications(res.data.notifications);
       setUnread(res.data.unreadCount);
     } catch { /* ignore */ }
-  }, []);
+  }, [setUnread]);
 
   useEffect(() => { load(); }, [load]);
 
-  // Real-time new notifications
+  // Real-time new notifications (count is handled by SocketContext; just update the list here)
   useEffect(() => {
     const socket = getSocket();
     if (!socket) return;
     const handler = (notif) => {
       setNotifications((prev) => [notif, ...prev].slice(0, 50));
-      setUnread((n) => n + 1);
     };
     socket.on('notification', handler);
     return () => socket.off('notification', handler);
@@ -68,7 +69,7 @@ export default function NotificationBell() {
   const handleMarkAll = async () => {
     await notificationsAPI.markAllRead();
     setNotifications((prev) => prev.map((n) => ({ ...n, read: true })));
-    setUnread(0);
+    clearUnreadNotifications();
   };
 
   return (

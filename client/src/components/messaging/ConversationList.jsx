@@ -1,9 +1,9 @@
 import { useState, useEffect, useRef } from 'react';
 import { format, isToday, isYesterday } from 'date-fns';
-import { Search, Plus, Users, MessageCircle, X } from 'lucide-react';
+import { Search, Users, MessageCircle, X, Pin, PinOff, Trash2 } from 'lucide-react';
 import { useAuth } from '../../contexts/AuthContext';
 import { useSocket } from '../../contexts/SocketContext';
-import { usersAPI } from '../../services/api';
+import { usersAPI, messagesAPI } from '../../services/api';
 
 const formatTime = (dateStr) => {
   if (!dateStr) return '';
@@ -143,13 +143,18 @@ export default function ConversationList({
   allUsers,
   onNewDirect,
   onNewGroup,
+  unreadCounts = {},
+  onPin,
+  onDelete,
 }) {
   const { user } = useAuth();
   const { onlineUsers } = useSocket();
   const [search, setSearch] = useState('');
   const [panel, setPanel] = useState(null); // 'direct' | 'group' | null
   const [groupName, setGroupName] = useState('');
-  const [groupMembers, setGroupMembers] = useState([]); // array of user objects
+  const [groupMembers, setGroupMembers] = useState([]);
+  const [contextMenu, setContextMenu] = useState(null); // { conv, x, y }
+  const contextRef = useRef(null);
 
   const filtered = conversations.filter((c) => {
     const other = c.participants?.find((p) => p._id !== user?._id);
@@ -171,6 +176,17 @@ export default function ConversationList({
         ? prev.filter((m) => m._id !== u._id)
         : [...prev, u]
     );
+  };
+
+  useEffect(() => {
+    const handler = (e) => { if (contextRef.current && !contextRef.current.contains(e.target)) setContextMenu(null); };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, []);
+
+  const handleContextMenu = (e, conv) => {
+    e.preventDefault();
+    setContextMenu({ conv, x: e.clientX, y: e.clientY });
   };
 
   return (
@@ -281,11 +297,14 @@ export default function ConversationList({
             const initials = name.split(' ').map((n) => n[0]).join('').slice(0, 2).toUpperCase();
             const isOnline = !conv.isGroup && (onlineUsers.has(other?._id) || other?.isOnline);
             const isSelected = selected?._id === conv._id;
+            const unread = unreadCounts[conv._id] || 0;
+            const isPinned = conv.pinnedBy?.some((id) => (id._id || id).toString() === user?._id);
 
             return (
               <button
                 key={conv._id}
                 onClick={() => onSelect(conv)}
+                onContextMenu={(e) => handleContextMenu(e, conv)}
                 className={`w-full flex items-center gap-3 px-4 py-3 text-left transition-colors hover:bg-gray-50 border-b border-gray-50 ${
                   isSelected ? 'bg-blue-50 border-l-4 border-l-blue-600' : ''
                 }`}
@@ -311,12 +330,18 @@ export default function ConversationList({
                 </div>
                 <div className="flex-1 min-w-0">
                   <div className="flex justify-between items-center">
-                    <p className="font-semibold text-sm text-gray-900 truncate">{name}</p>
-                    <p className="text-xs text-gray-400 ml-2 flex-shrink-0">
-                      {formatTime(conv.updatedAt)}
-                    </p>
+                    <p className={`text-sm truncate ${unread > 0 ? 'font-bold text-gray-900' : 'font-semibold text-gray-900'}`}>{name}</p>
+                    <div className="flex items-center gap-1.5 ml-2 flex-shrink-0">
+                      {isPinned && <Pin className="h-3 w-3 text-blue-400 flex-shrink-0" />}
+                      {unread > 0 && (
+                        <span className="bg-blue-600 text-white text-[10px] font-bold rounded-full min-w-[18px] h-[18px] flex items-center justify-center px-1">
+                          {unread > 99 ? '99+' : unread}
+                        </span>
+                      )}
+                      <p className="text-xs text-gray-400">{formatTime(conv.updatedAt)}</p>
+                    </div>
                   </div>
-                  <p className="text-xs text-gray-500 truncate mt-0.5">
+                  <p className={`text-xs truncate mt-0.5 ${unread > 0 ? 'text-gray-700 font-medium' : 'text-gray-500'}`}>
                     {conv.lastMessage
                       ? `${conv.lastMessage.sender?.name?.split(' ')[0] || ''}: ${conv.lastMessage.content}`
                       : 'Start a conversation'}
@@ -327,6 +352,32 @@ export default function ConversationList({
           })
         )}
       </div>
+
+      {/* Context menu */}
+      {contextMenu && (
+        <div
+          ref={contextRef}
+          className="fixed z-[300] bg-white rounded-xl shadow-xl border border-gray-200 py-1 w-44"
+          style={{ top: contextMenu.y, left: contextMenu.x }}
+        >
+          <button
+            onClick={() => { onPin(contextMenu.conv); setContextMenu(null); }}
+            className="w-full flex items-center gap-2.5 px-4 py-2.5 text-sm text-gray-700 hover:bg-gray-50 transition-colors"
+          >
+            {contextMenu.conv.pinnedBy?.some((id) => (id._id || id).toString() === user?._id)
+              ? <><PinOff className="h-4 w-4 text-gray-400" /> Unpin</>
+              : <><Pin className="h-4 w-4 text-blue-500" /> Pin</>
+            }
+          </button>
+          <div className="border-t border-gray-100 my-1" />
+          <button
+            onClick={() => { onDelete(contextMenu.conv); setContextMenu(null); }}
+            className="w-full flex items-center gap-2.5 px-4 py-2.5 text-sm text-red-600 hover:bg-red-50 transition-colors"
+          >
+            <Trash2 className="h-4 w-4" /> Delete
+          </button>
+        </div>
+      )}
     </div>
   );
 }

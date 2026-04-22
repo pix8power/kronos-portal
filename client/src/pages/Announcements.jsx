@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { Megaphone, Pin, Trash2, Plus, X, ChevronDown } from 'lucide-react';
 import { announcementsAPI } from '../services/api';
 import { useAuth } from '../contexts/AuthContext';
+import { useToast } from '../contexts/ToastContext';
 import { formatDistanceToNow } from 'date-fns';
 
 const PRIVILEGED = ['admin', 'manager', 'charge_nurse'];
@@ -16,11 +17,12 @@ export default function Announcements() {
   const [saving, setSaving] = useState(false);
 
   const isPrivileged = PRIVILEGED.includes(user?.role);
+  const { error: toastError, success: toastSuccess } = useToast();
 
   useEffect(() => {
     announcementsAPI.getAll()
       .then((res) => setAnnouncements(res.data))
-      .catch(() => {})
+      .catch(() => toastError('Failed to load announcements'))
       .finally(() => setLoading(false));
   }, []);
 
@@ -32,15 +34,19 @@ export default function Announcements() {
       setAnnouncements((prev) => [res.data, ...prev]);
       setForm({ title: '', body: '', targetRoles: [], pinned: false });
       setShowForm(false);
-    } catch (err) { console.error(err); }
-    finally { setSaving(false); }
+      toastSuccess('Announcement posted');
+    } catch {
+      toastError('Failed to post announcement');
+    } finally { setSaving(false); }
   };
 
   const handlePin = async (id, pinned) => {
     try {
       const res = await announcementsAPI.pin(id, !pinned);
       setAnnouncements((prev) => prev.map((a) => a._id === id ? res.data : a).sort((a, b) => b.pinned - a.pinned || new Date(b.createdAt) - new Date(a.createdAt)));
-    } catch (err) { console.error(err); }
+    } catch {
+      toastError('Failed to update announcement');
+    }
   };
 
   const handleDelete = async (id) => {
@@ -48,7 +54,10 @@ export default function Announcements() {
     try {
       await announcementsAPI.delete(id);
       setAnnouncements((prev) => prev.filter((a) => a._id !== id));
-    } catch (err) { console.error(err); }
+      toastSuccess('Announcement deleted');
+    } catch {
+      toastError('Failed to delete announcement');
+    }
   };
 
   const toggleRole = (role) => {

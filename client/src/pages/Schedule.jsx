@@ -18,6 +18,7 @@ import {
 import { ChevronLeft, ChevronRight, Plus, Calendar, Download, Copy, AlertTriangle, RefreshCw, BanIcon, X, MessageCircle, Check, XCircle, Clock, ZoomIn, ZoomOut } from 'lucide-react';
 import { schedulesAPI, usersAPI, messagesAPI } from '../services/api';
 import { useAuth } from '../contexts/AuthContext';
+import { useToast } from '../contexts/ToastContext';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import ShiftModal from '../components/schedule/ShiftModal';
@@ -761,6 +762,7 @@ function StaffMonthGrid({ days, shifts, employees, approvedTimeOff, pendingTimeO
 // ── Main Schedule page ────────────────────────────────────────────────────────
 export default function Schedule() {
   const { user } = useAuth();
+  const { error: toastError } = useToast();
   const isAdmin = user?.role === 'admin' || user?.role === 'manager';
 
   const [chatOpen, setChatOpen] = useState(false);
@@ -805,7 +807,7 @@ export default function Schedule() {
     if (!isAdmin) {
       schedulesAPI.getRecurringUnavailability()
         .then((res) => setRecurringUnavail(res.data || []))
-        .catch(() => {});
+        .catch(() => toastError('Failed to load availability settings'));
     }
   }, [isAdmin]);
 

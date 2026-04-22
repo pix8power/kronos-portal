@@ -15,6 +15,7 @@ export default function Messages() {
   const [selected, setSelected] = useState(null);
   const [loading, setLoading] = useState(true);
   const [mobileShowChat, setMobileShowChat] = useState(false);
+  const [unreadCounts, setUnreadCounts] = useState({});
 
   // Clear badge and mark all as read in DB when Messages page opens
   useEffect(() => {
@@ -44,6 +45,12 @@ export default function Messages() {
             : c
         ).sort((a, b) => new Date(b.updatedAt) - new Date(a.updatedAt))
       );
+      setSelected((current) => {
+        if (current?._id !== conversationId) {
+          setUnreadCounts((prev) => ({ ...prev, [conversationId]: (prev[conversationId] || 0) + 1 }));
+        }
+        return current;
+      });
     };
 
     const onNewMessage = ({ conversationId, message }) => onNotification({ conversationId, message });
@@ -87,6 +94,35 @@ export default function Messages() {
   const handleSelect = (conv) => {
     setSelected(conv);
     setMobileShowChat(true);
+    setUnreadCounts((prev) => ({ ...prev, [conv._id]: 0 }));
+  };
+
+  const handlePin = async (conv) => {
+    try {
+      const res = await messagesAPI.pinConversation(conv._id);
+      setConversations((prev) => prev.map((c) => {
+        if (c._id !== conv._id) return c;
+        const userId = conv.participants?.find(() => true)?._id; // just need to toggle
+        const alreadyPinned = res.data.pinned;
+        return { ...c, pinnedBy: alreadyPinned ? [...(c.pinnedBy || []), 'me'] : [] };
+      }).sort((a, b) => {
+        if (a.pinnedBy?.length && !b.pinnedBy?.length) return -1;
+        if (!a.pinnedBy?.length && b.pinnedBy?.length) return 1;
+        return 0;
+      }));
+      // Refresh to get accurate pinnedBy from server
+      const fresh = await messagesAPI.getConversations();
+      setConversations(fresh.data);
+    } catch { /* ignore */ }
+  };
+
+  const handleDelete = async (conv) => {
+    if (!confirm('Remove this conversation?')) return;
+    try {
+      await messagesAPI.deleteConversation(conv._id);
+      setConversations((prev) => prev.filter((c) => c._id !== conv._id));
+      if (selected?._id === conv._id) { setSelected(null); setMobileShowChat(false); }
+    } catch { /* ignore */ }
   };
 
   if (loading) {
@@ -119,6 +155,9 @@ export default function Messages() {
           allUsers={allUsers}
           onNewDirect={handleNewDirect}
           onNewGroup={handleNewGroup}
+          unreadCounts={unreadCounts}
+          onPin={handlePin}
+          onDelete={handleDelete}
         />
       </div>
 

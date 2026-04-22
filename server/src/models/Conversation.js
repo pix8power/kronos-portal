@@ -8,6 +8,8 @@ const conversationSchema = new mongoose.Schema(
     avatar: { type: String, default: '' },
     lastMessage: { type: mongoose.Schema.Types.ObjectId, ref: 'Message' },
     createdBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
+    pinnedBy: [{ type: mongoose.Schema.Types.ObjectId, ref: 'User' }],
+    deletedFor: [{ type: mongoose.Schema.Types.ObjectId, ref: 'User' }],
   },
   { timestamps: true }
 );

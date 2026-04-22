@@ -252,7 +252,7 @@ export default function MasterSchedule() {
               entries={schedule.entries || []}
               canManage={canManage}
               activeDepartment={activeDepartment}
-              onAdd={(dayOfWeek) => setAddForm({ week, dayOfWeek })}
+              onAdd={(dayOfWeek, employeeId) => setAddForm({ week, dayOfWeek, employeeId })}
               onRemove={handleRemoveEntry}
             />
           ))}
@@ -264,6 +264,7 @@ export default function MasterSchedule() {
         <AddEntryModal
           week={addForm.week}
           dayOfWeek={addForm.dayOfWeek}
+          defaultEmployee={addForm.employeeId}
           users={deptUsers}
           onAdd={handleAddEntry}
           onClose={() => setAddForm(null)}
@@ -455,7 +456,7 @@ function WeekStaffGrid({ week, users, entries, canManage, onAdd, onRemove }) {
                             </div>
                             {canManage && (
                               <button
-                                onClick={() => onAdd(dayOfWeek)}
+                                onClick={() => onAdd(dayOfWeek, emp._id)}
                                 className="mt-0.5 w-full text-[9px] text-blue-400 hover:text-blue-600 hover:bg-blue-50 rounded py-0.5 flex items-center justify-center gap-0.5 border border-dashed border-blue-100 hover:border-blue-300 transition-colors"
                               >
                                 <Plus className="h-2.5 w-2.5" />
@@ -500,9 +501,9 @@ function ShiftChip({ entry, canManage, onRemove, empColor }) {
   );
 }
 
-function AddEntryModal({ week, dayOfWeek, users, onAdd, onClose }) {
+function AddEntryModal({ week, dayOfWeek, defaultEmployee, users, onAdd, onClose }) {
   const [form, setForm] = useState({
-    employee: '',
+    employee: defaultEmployee || '',
     startTime: '08:00',
     endTime: '16:00',
     position: '',

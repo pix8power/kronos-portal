@@ -24,11 +24,54 @@ function decryptConversation(conv) {
 // Get all conversations for the current user
 router.get('/conversations', auth, async (req, res) => {
   try {
-    const conversations = await Conversation.find({ participants: req.user._id })
+    const userId = req.user._id;
+    const conversations = await Conversation.find({ participants: userId, deletedFor: { $ne: userId } })
       .populate('participants', 'name email avatar color isOnline lastSeen')
       .populate({ path: 'lastMessage', populate: { path: 'sender', select: 'name' } })
       .sort({ updatedAt: -1 });
-    res.json(conversations.map(decryptConversation));
+    const decrypted = conversations.map(decryptConversation);
+    // Pinned conversations first
+    decrypted.sort((a, b) => {
+      const aPin = a.pinnedBy?.some((id) => id.toString() === userId.toString());
+      const bPin = b.pinnedBy?.some((id) => id.toString() === userId.toString());
+      if (aPin && !bPin) return -1;
+      if (!aPin && bPin) return 1;
+      return 0;
+    });
+    res.json(decrypted);
+  } catch (err) {
+    res.status(500).json({ message: err.message });
+  }
+});
+
+// Pin / unpin a conversation
+router.patch('/conversations/:id/pin', auth, async (req, res) => {
+  try {
+    const userId = req.user._id;
+    const conv = await Conversation.findOne({ _id: req.params.id, participants: userId });
+    if (!conv) return res.status(404).json({ message: 'Not found' });
+    const isPinned = conv.pinnedBy.some((id) => id.toString() === userId.toString());
+    if (isPinned) {
+      conv.pinnedBy.pull(userId);
+    } else {
+      conv.pinnedBy.push(userId);
+    }
+    await conv.save();
+    res.json({ pinned: !isPinned });
+  } catch (err) {
+    res.status(500).json({ message: err.message });
+  }
+});
+
+// Delete (hide) a conversation for the current user
+router.delete('/conversations/:id', auth, async (req, res) => {
+  try {
+    const userId = req.user._id;
+    await Conversation.findOneAndUpdate(
+      { _id: req.params.id, participants: userId },
+      { $addToSet: { deletedFor: userId } }
+    );
+    res.json({ ok: true });
   } catch (err) {
     res.status(500).json({ message: err.message });
   }

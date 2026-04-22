@@ -11,6 +11,7 @@ export const SocketProvider = ({ children }) => {
   const [socket, setSocket] = useState(null);
   const [onlineUsers, setOnlineUsers] = useState(new Set());
   const [unreadMessages, setUnreadMessages] = useState(0);
+  const [unreadNotifications, setUnreadNotifications] = useState(0);
 
   useEffect(() => {
     if (!user) {
@@ -51,6 +52,10 @@ export const SocketProvider = ({ children }) => {
       setUnreadMessages((n) => n + 1);
     });
 
+    s.on('notification', () => {
+      setUnreadNotifications((n) => n + 1);
+    });
+
     return () => {
       s.disconnect();
       socketRef.current = null;
@@ -61,9 +66,10 @@ export const SocketProvider = ({ children }) => {
   const getSocket = useCallback(() => socketRef.current, []);
   const incrementUnreadMessages = useCallback(() => setUnreadMessages((n) => n + 1), []);
   const clearUnreadMessages = useCallback(() => setUnreadMessages(0), []);
+  const clearUnreadNotifications = useCallback(() => setUnreadNotifications(0), []);
 
   return (
-    <SocketContext.Provider value={{ socket, getSocket, onlineUsers, unreadMessages, incrementUnreadMessages, clearUnreadMessages }}>
+    <SocketContext.Provider value={{ socket, getSocket, onlineUsers, unreadMessages, incrementUnreadMessages, clearUnreadMessages, unreadNotifications, setUnreadNotifications, clearUnreadNotifications }}>
       {children}
     </SocketContext.Provider>
   );
