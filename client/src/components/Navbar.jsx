@@ -89,7 +89,7 @@ export default function Navbar() {
         <div className="flex h-16 items-center justify-between">
           {/* Logo */}
           <Link to="/" className="flex items-center gap-2 font-bold text-xl text-blue-500 dark:text-blue-400">
-            <Calendar className="h-6 w-6" />
+            <img src="/icon-192.png" alt="Kronos" className="h-7 w-7 rounded-full" />
             <span>KronosPortal</span>
           </Link>
 

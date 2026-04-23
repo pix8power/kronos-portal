@@ -91,6 +91,13 @@ app.use('/uploads', require('express').static(require('path').join(__dirname, '.
 
 app.get('/api/health', (req, res) => res.json({ status: 'ok' }));
 
+// Serve React client in production
+if (process.env.NODE_ENV === 'production') {
+  const clientDist = require('path').join(__dirname, '../../client/dist');
+  app.use(require('express').static(clientDist));
+  app.get('*', (req, res) => res.sendFile(require('path').join(clientDist, 'index.html')));
+}
+
 // Make io accessible in routes via req.app.get('io')
 app.set('io', io);
 

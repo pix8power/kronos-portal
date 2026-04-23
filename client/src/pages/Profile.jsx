@@ -298,11 +298,6 @@ export default function Profile() {
                 className="w-full px-3 py-2 text-sm border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500" />
             </div>
           </div>
-          <div>
-            <label className="text-xs font-medium text-gray-500 dark:text-gray-400 mb-1 block">Bio</label>
-            <textarea rows={2} value={form.bio} onChange={(e) => setForm({ ...form, bio: e.target.value })}
-              className="w-full px-3 py-2 text-sm border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none" placeholder="Brief bio..." />
-          </div>
           <button onClick={() => handleSave()} disabled={saving} className="bg-blue-600 hover:bg-blue-700 disabled:bg-blue-400 text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors">
             {saving ? 'Saving...' : 'Save Changes'}
           </button>

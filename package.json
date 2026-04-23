@@ -4,7 +4,9 @@
   "scripts": {
     "install:all": "npm install && cd server && npm install && cd ../client && npm install",
     "dev": "concurrently \"cd server && npm run dev\" \"cd client && npm run dev\"",
-    "start": "concurrently \"cd server && npm start\" \"cd client && npm run preview\""
+    "start": "concurrently \"cd server && npm start\" \"cd client && npm run preview\"",
+    "build": "cd client && npm install && npm run build",
+    "start:prod": "cd server && npm install && node src/index.js"
   },
   "devDependencies": {
     "autocannon": "^8.0.0",
