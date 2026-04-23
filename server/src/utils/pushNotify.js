@@ -1,18 +1,19 @@
 const webpush = require('web-push');
 const PushSubscription = require('../models/PushSubscription');
 
-webpush.setVapidDetails(
-  process.env.VAPID_EMAIL,
-  process.env.VAPID_PUBLIC_KEY,
-  process.env.VAPID_PRIVATE_KEY
-);
+let vapidInitialized = false;
 
-/**
- * Send a push notification to all subscriptions for the given userId.
- * @param {string} userId
- * @param {{ title: string, body: string, icon?: string, badge?: string, data?: object }} payload
- */
+function initVapid() {
+  if (vapidInitialized) return true;
+  const { VAPID_EMAIL, VAPID_PUBLIC_KEY, VAPID_PRIVATE_KEY } = process.env;
+  if (!VAPID_EMAIL || !VAPID_PUBLIC_KEY || !VAPID_PRIVATE_KEY) return false;
+  webpush.setVapidDetails(VAPID_EMAIL, VAPID_PUBLIC_KEY, VAPID_PRIVATE_KEY);
+  vapidInitialized = true;
+  return true;
+}
+
 async function pushToUser(userId, payload) {
+  if (!initVapid()) return;
   const subs = await PushSubscription.find({ user: userId });
   const notification = JSON.stringify(payload);
 
@@ -24,7 +25,6 @@ async function pushToUser(userId, payload) {
           notification
         );
       } catch (err) {
-        // 410 Gone = subscription expired/unregistered — clean it up
         if (err.statusCode === 410 || err.statusCode === 404) {
           await PushSubscription.deleteOne({ _id: sub._id });
         }
