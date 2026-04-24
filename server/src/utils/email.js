@@ -39,4 +39,22 @@ async function sendPasswordReset(toEmail, toName, resetUrl) {
   });
 }
 
-module.exports = { sendPasswordReset };
+async function sendContactForm({ name, email, teamSize, message }) {
+  const transporter = createTransport();
+  await transporter.sendMail({
+    from: `"KronosPortal" <${process.env.SMTP_USER}>`,
+    to: process.env.SMTP_USER,
+    subject: `Demo Request from ${name}`,
+    html: `
+      <div style="font-family:sans-serif;max-width:480px;margin:auto;padding:24px">
+        <h2 style="color:#1e40af">New Demo Request</h2>
+        <p><strong>Name:</strong> ${name}</p>
+        <p><strong>Email:</strong> ${email}</p>
+        <p><strong>Team Size:</strong> ${teamSize || 'Not specified'}</p>
+        <p><strong>Message:</strong> ${message || 'None'}</p>
+      </div>
+    `,
+  });
+}
+
+module.exports = { sendPasswordReset, sendContactForm };

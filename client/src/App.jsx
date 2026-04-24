@@ -26,6 +26,7 @@ import { useSessionTimeout } from './hooks/useSessionTimeout';
 import { usePushNotifications } from './hooks/usePushNotifications';
 import { useFcmNotifications } from './hooks/useFcmNotifications';
 import InstallPrompt from './components/InstallPrompt';
+import ForceChangePassword from './components/ForceChangePassword';
 
 const ProtectedRoute = ({ children }) => {
   const { user, loading } = useAuth();
@@ -73,7 +74,7 @@ const AppLayout = ({ children }) => (
 );
 
 function AppRoutes() {
-  const { user } = useAuth();
+  const { user, mustChangePassword } = useAuth();
   useSessionTimeout();
   usePushNotifications();
   useFcmNotifications();
@@ -82,6 +83,7 @@ function AppRoutes() {
     <>
       <SessionWarningBanner />
       <InstallPrompt />
+      {mustChangePassword && <ForceChangePassword />}
       <Routes>
         <Route path="/login" element={user ? <Navigate to="/" replace /> : <Login />} />
         <Route path="/register" element={user ? <Navigate to="/" replace /> : <Register />} />

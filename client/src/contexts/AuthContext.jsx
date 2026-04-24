@@ -8,6 +8,7 @@ const ACTIVE_DEPT_KEY = 'kronos_active_dept';
 export const AuthProvider = ({ children }) => {
   const [user, setUser] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [mustChangePassword, setMustChangePassword] = useState(false);
   const [activeDepartment, setActiveDepartmentState] = useState(
     () => localStorage.getItem(ACTIVE_DEPT_KEY) || null
   );
@@ -48,10 +49,8 @@ export const AuthProvider = ({ children }) => {
     localStorage.setItem('token', res.data.token);
     const u = res.data.user;
     setUser(u);
-    // Set active dept to user's primary on login
-    if (u.department) {
-      setActiveDepartment(u.department);
-    }
+    if (res.data.mustChangePassword) setMustChangePassword(true);
+    if (u.department) setActiveDepartment(u.department);
     return u;
   };
 
@@ -86,7 +85,7 @@ export const AuthProvider = ({ children }) => {
   };
 
   return (
-    <AuthContext.Provider value={{ user, loading, login, register, logout, updateUser, activeDepartment, setActiveDepartment }}>
+    <AuthContext.Provider value={{ user, loading, login, register, logout, updateUser, activeDepartment, setActiveDepartment, mustChangePassword, setMustChangePassword }}>
       {children}
     </AuthContext.Provider>
   );

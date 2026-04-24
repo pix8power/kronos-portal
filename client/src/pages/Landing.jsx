@@ -1,5 +1,6 @@
+import { useState } from 'react';
 import { Link } from 'react-router-dom';
-import { MessageCircle, Clock, Zap, CheckCircle, Calendar, Users, Shield } from 'lucide-react';
+import { MessageCircle, Clock, Zap, CheckCircle } from 'lucide-react';
 
 const features = [
   {
@@ -29,6 +30,72 @@ const included = [
   'Mobile-friendly — installs as an app',
   'Push notifications',
 ];
+
+function ContactForm() {
+  const [form, setForm] = useState({ name: '', email: '', teamSize: '', message: '' });
+  const [sent, setSent] = useState(false);
+  const [loading, setLoading] = useState(false);
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    setLoading(true);
+    try {
+      await fetch('/api/contact', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(form),
+      });
+      setSent(true);
+    } catch {
+      setSent(true);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  if (sent) return (
+    <div className="text-center py-8">
+      <div className="w-12 h-12 bg-green-100 rounded-full flex items-center justify-center mx-auto mb-3">
+        <CheckCircle className="h-6 w-6 text-green-600" />
+      </div>
+      <p className="font-semibold text-gray-900">Thanks! We'll be in touch within 24 hours.</p>
+    </div>
+  );
+
+  return (
+    <form onSubmit={handleSubmit} className="space-y-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+        <input
+          type="text" placeholder="Your name" required
+          value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })}
+          className="border border-gray-300 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+        />
+        <input
+          type="email" placeholder="Work email" required
+          value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })}
+          className="border border-gray-300 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+        />
+      </div>
+      <input
+        type="text" placeholder="Team size (e.g. 15 staff)"
+        value={form.teamSize} onChange={(e) => setForm({ ...form, teamSize: e.target.value })}
+        className="w-full border border-gray-300 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+      />
+      <textarea
+        placeholder="Tell us about your team or any questions..."
+        rows={3}
+        value={form.message} onChange={(e) => setForm({ ...form, message: e.target.value })}
+        className="w-full border border-gray-300 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none"
+      />
+      <button
+        type="submit" disabled={loading}
+        className="w-full bg-blue-600 hover:bg-blue-700 text-white font-semibold py-3 rounded-xl text-sm transition-colors disabled:opacity-50"
+      >
+        {loading ? 'Sending...' : 'Request a Demo'}
+      </button>
+    </form>
+  );
+}
 
 export default function Landing() {
   return (
@@ -139,17 +206,14 @@ export default function Landing() {
         </div>
       </section>
 
-      {/* CTA */}
-      <section className="bg-gray-50 px-6 py-20 text-center border-t border-gray-100">
+      {/* Contact Form */}
+      <section className="bg-gray-50 px-6 py-20 border-t border-gray-100">
         <div className="max-w-xl mx-auto">
-          <h2 className="text-2xl font-bold text-gray-900 mb-3">Ready to simplify your scheduling?</h2>
-          <p className="text-gray-500 text-sm mb-6">Request a demo and we'll get your team set up within 24 hours.</p>
-          <a
-            href="mailto:pix8power@gmail.com?subject=KronosPortal Demo Request"
-            className="inline-block bg-blue-600 hover:bg-blue-700 text-white font-semibold px-8 py-3 rounded-xl transition-colors text-sm"
-          >
-            Request a Demo
-          </a>
+          <h2 className="text-2xl font-bold text-gray-900 text-center mb-2">Ready to simplify your scheduling?</h2>
+          <p className="text-gray-500 text-sm text-center mb-8">Request a demo and we'll get your team set up within 24 hours.</p>
+          <div className="bg-white rounded-2xl border border-gray-200 p-6 shadow-sm">
+            <ContactForm />
+          </div>
         </div>
       </section>
 

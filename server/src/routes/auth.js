@@ -28,6 +28,7 @@ router.post('/register', async (req, res) => {
       department: department || '',
       phone: phone || '',
       color: color || '#3B82F6',
+      mustChangePassword: true,
     });
 
     const token = signToken(user._id);
@@ -89,7 +90,7 @@ router.post('/login', async (req, res) => {
     await user.save();
 
     const token = signToken(user._id);
-    res.json({ token, user: user.toSafeObject() });
+    res.json({ token, user: user.toSafeObject(), mustChangePassword: user.mustChangePassword });
   } catch (err) {
     res.status(500).json({ message: err.message });
   }
@@ -159,6 +160,23 @@ router.post('/reset-password/:token', async (req, res) => {
     await user.save();
 
     res.json({ message: 'Password reset successfully. You can now log in.' });
+  } catch (err) {
+    res.status(500).json({ message: err.message });
+  }
+});
+
+// Force change password on first login
+router.post('/change-password-first', auth, async (req, res) => {
+  try {
+    const { password } = req.body;
+    if (!password || password.length < 6) {
+      return res.status(400).json({ message: 'Password must be at least 6 characters.' });
+    }
+    const user = await User.findById(req.user._id);
+    user.password = password;
+    user.mustChangePassword = false;
+    await user.save();
+    res.json({ message: 'Password changed successfully.' });
   } catch (err) {
     res.status(500).json({ message: err.message });
   }

@@ -19,6 +19,7 @@ const userSchema = new mongoose.Schema(
     lockUntil: { type: Date },
     resetPasswordToken: { type: String },
     resetPasswordExpires: { type: Date },
+    mustChangePassword: { type: Boolean, default: false },
     // Profile extras
     hireDate:   { type: String, default: '' },
     bio:        { type: String, default: '' },

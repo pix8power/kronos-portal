@@ -91,6 +91,17 @@ app.use('/uploads', require('express').static(require('path').join(__dirname, '.
 
 app.get('/api/health', (req, res) => res.json({ status: 'ok' }));
 
+app.post('/api/contact', async (req, res) => {
+  try {
+    const { sendContactForm } = require('./utils/email');
+    await sendContactForm(req.body);
+    res.json({ message: 'Sent' });
+  } catch (err) {
+    console.error('Contact form error:', err.message);
+    res.json({ message: 'Received' });
+  }
+});
+
 // Serve React client in production
 if (process.env.NODE_ENV === 'production') {
   const clientDist = require('path').join(__dirname, '../../client/dist');
