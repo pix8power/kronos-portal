@@ -37,10 +37,20 @@ router.get('/', auth, async (req, res) => {
 // POST — submit a new correction
 router.post('/', auth, async (req, res) => {
   try {
-    const { entries, reason } = req.body;
+    const { entries, reason, password } = req.body;
 
     if (!entries || entries.length === 0) {
       return res.status(400).json({ message: 'At least one entry is required.' });
+    }
+
+    // Verify password before accepting submission
+    if (!password) {
+      return res.status(400).json({ message: 'Password confirmation is required.' });
+    }
+    const fullUser = await User.findById(req.user._id);
+    const valid = await fullUser.comparePassword(password);
+    if (!valid) {
+      return res.status(401).json({ message: 'Invalid password. Please try again.' });
     }
 
     const request = await TimeCorrection.create({

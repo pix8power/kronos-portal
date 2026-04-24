@@ -63,6 +63,10 @@ function TimeCorrectionTab({ user }) {
   const [reviewNotes, setReviewNotes] = useState({});
   const [reviewing, setReviewing]     = useState(null);
   const [reviewError, setReviewError] = useState(null);
+  const [pendingEntries, setPendingEntries] = useState(null);
+  const [confirmPassword, setConfirmPassword] = useState('');
+  const [confirmError, setConfirmError] = useState('');
+  const [confirmSubmitting, setConfirmSubmitting] = useState(false);
 
   const load = () => {
     setLoading(true);
@@ -89,16 +93,32 @@ function TimeCorrectionTab({ user }) {
       setSubmitError('Please provide a reason for every filled row.');
       return;
     }
-    setSubmitting(true);
+    // Show confirmation modal instead of submitting directly
+    setPendingEntries(filled);
+    setConfirmPassword('');
+    setConfirmError('');
+  };
+
+  const handleConfirmSubmit = async () => {
+    if (!confirmPassword) return setConfirmError('Please enter your password to confirm.');
+    setConfirmSubmitting(true);
+    setConfirmError('');
     try {
-      const res = await timeCorrectionAPI.submit({ entries: filled });
+      const res = await timeCorrectionAPI.submit({ entries: pendingEntries, password: confirmPassword });
       setRequests((prev) => [res.data, ...prev]);
       setShowForm(false);
       setEntries([emptyEntry(), emptyEntry(), emptyEntry(), emptyEntry()]);
+      setPendingEntries(null);
+      setConfirmPassword('');
     } catch (err) {
-      setSubmitError(err.response?.data?.message || err.message || 'Failed to submit request. Please try again.');
+      const msg = err.response?.data?.message || err.message || 'Failed to submit.';
+      if (msg.toLowerCase().includes('password') || msg.toLowerCase().includes('invalid')) {
+        setConfirmError('Incorrect password. Please try again.');
+      } else {
+        setConfirmError(msg);
+      }
     } finally {
-      setSubmitting(false);
+      setConfirmSubmitting(false);
     }
   };
 
@@ -126,6 +146,44 @@ function TimeCorrectionTab({ user }) {
 
   return (
     <div>
+      {/* Password confirmation modal */}
+      {pendingEntries && (
+        <div className="fixed inset-0 z-[999] bg-black/60 flex items-center justify-center px-4">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md p-8">
+            <h2 className="text-lg font-bold text-gray-900 mb-2">Confirm Submission</h2>
+            <p className="text-sm text-gray-600 leading-relaxed mb-5">
+              By submitting this time correction request, I certify under penalty of applicable law that the information provided is true, accurate, and complete to the best of my knowledge. I understand that submitting false, misleading, or fraudulent time records may result in disciplinary action, termination of employment, and/or legal consequences. I acknowledge that this submission constitutes an electronic record and carries the same legal weight as a handwritten signature.
+            </p>
+            <p className="text-sm font-medium text-gray-700 mb-2">Enter your password to confirm:</p>
+            <input
+              type="password"
+              placeholder="Your password"
+              value={confirmPassword}
+              onChange={(e) => setConfirmPassword(e.target.value)}
+              onKeyDown={(e) => e.key === 'Enter' && handleConfirmSubmit()}
+              className="w-full border border-gray-300 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 mb-3"
+              autoFocus
+            />
+            {confirmError && <p className="text-red-500 text-xs mb-3">{confirmError}</p>}
+            <div className="flex gap-3">
+              <button
+                onClick={() => { setPendingEntries(null); setConfirmPassword(''); setConfirmError(''); }}
+                className="flex-1 border border-gray-300 text-gray-700 font-medium py-2.5 rounded-xl text-sm hover:bg-gray-50 transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleConfirmSubmit}
+                disabled={confirmSubmitting || !confirmPassword}
+                className="flex-1 bg-blue-600 hover:bg-blue-700 text-white font-semibold py-2.5 rounded-xl text-sm transition-colors disabled:opacity-50"
+              >
+                {confirmSubmitting ? 'Submitting...' : 'Submit Request'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Sub-header */}
       <div className="flex flex-wrap items-center justify-between gap-3 mb-5">
         <div className="flex items-center gap-3">
