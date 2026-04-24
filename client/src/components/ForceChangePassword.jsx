@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { Link } from 'react-router-dom';
 import { Lock, Eye, EyeOff } from 'lucide-react';
 import { authAPI } from '../services/api';
 import { useAuth } from '../contexts/AuthContext';
@@ -8,6 +9,7 @@ export default function ForceChangePassword() {
   const [password, setPassword] = useState('');
   const [confirm, setConfirm] = useState('');
   const [show, setShow] = useState(false);
+  const [agreed, setAgreed] = useState(false);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
 
@@ -16,6 +18,7 @@ export default function ForceChangePassword() {
     setError('');
     if (password.length < 6) return setError('Password must be at least 6 characters.');
     if (password !== confirm) return setError('Passwords do not match.');
+    if (!agreed) return setError('You must agree to the Terms of Service to continue.');
     setLoading(true);
     try {
       await authAPI.changePasswordFirst({ password });
@@ -61,13 +64,27 @@ export default function ForceChangePassword() {
             className="w-full border border-gray-300 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
             required
           />
+          <label className="flex items-start gap-2 cursor-pointer">
+            <input
+              type="checkbox"
+              checked={agreed}
+              onChange={(e) => setAgreed(e.target.checked)}
+              className="mt-0.5 h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+            />
+            <span className="text-xs text-gray-600">
+              I agree to the{' '}
+              <Link to="/terms" target="_blank" className="text-blue-600 hover:underline">Terms of Service</Link>
+              {' '}and{' '}
+              <Link to="/privacy" target="_blank" className="text-blue-600 hover:underline">Privacy Policy</Link>
+            </span>
+          </label>
           {error && <p className="text-red-500 text-xs">{error}</p>}
           <button
             type="submit"
-            disabled={loading}
+            disabled={loading || !agreed}
             className="w-full bg-blue-600 hover:bg-blue-700 text-white font-semibold py-2.5 rounded-xl text-sm transition-colors disabled:opacity-50"
           >
-            {loading ? 'Saving...' : 'Set Password'}
+            {loading ? 'Saving...' : 'Set Password & Continue'}
           </button>
         </form>
       </div>
