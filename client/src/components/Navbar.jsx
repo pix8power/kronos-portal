@@ -12,15 +12,12 @@ import {
   ChevronDown,
   Building2,
   ShieldCheck,
-  Sun,
-  Moon,
   Megaphone,
   UserCircle,
   HelpCircle,
 } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import { useSocket } from '../contexts/SocketContext';
-import { useTheme } from '../contexts/ThemeContext';
 import ProfileModal from './ProfileModal';
 import NotificationBell from './NotificationBell';
 
@@ -39,7 +36,7 @@ export default function Navbar() {
   const { user, logout } = useAuth();
   const { activeDepartment, setActiveDepartment } = useAuth();
   const { unreadMessages, clearUnreadMessages, unreadNotifications, clearUnreadNotifications } = useSocket();
-  const { dark, toggle: toggleTheme } = useTheme();
+
   const location = useLocation();
   const navigate = useNavigate();
   const [open, setOpen] = useState(false);
@@ -160,13 +157,6 @@ export default function Navbar() {
               </div>
             )}
 
-            <button
-              onClick={toggleTheme}
-              className="p-2 text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-lg transition-colors"
-              title={dark ? 'Switch to light mode' : 'Switch to dark mode'}
-            >
-              {dark ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
-            </button>
             <NotificationBell />
             <button
               onClick={() => setShowProfile(true)}
@@ -312,13 +302,6 @@ export default function Navbar() {
             <HelpCircle className="h-4 w-4" />
             Help & FAQ
           </Link>
-          <button
-            onClick={toggleTheme}
-            className="flex items-center gap-3 w-full px-3 py-2 text-sm font-medium text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-lg"
-          >
-            {dark ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
-            {dark ? 'Light Mode' : 'Dark Mode'}
-          </button>
           <button
             onClick={handleLogout}
             className="flex items-center gap-3 w-full px-3 py-2 text-sm font-medium text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-lg"
