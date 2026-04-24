@@ -4,8 +4,6 @@
     "buildCommand": "cd server && npm install && cd ../client && npm install && npm run build"
   },
   "deploy": {
-    "startCommand": "cd server && node src/index.js",
-    "healthcheckPath": "/api/health",
-    "healthcheckTimeout": 120
+    "startCommand": "cd server && node src/index.js"
   }
 }
