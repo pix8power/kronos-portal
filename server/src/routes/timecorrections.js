@@ -68,7 +68,6 @@ router.post('/', auth, async (req, res) => {
       const msgContent =
         `📋 Time Correction Request from ${req.user.name}\n\n` +
         `${'Date'.padEnd(11)}| ${'In'.padEnd(9)}| ${'Lunch Out'.padEnd(10)}| ${'Lunch In'.padEnd(10)}| ${'Out'.padEnd(9)}| Reason\n` +
-        `${'─'.repeat(11)}|${'─'.repeat(10)}|${'─'.repeat(11)}|${'─'.repeat(11)}|${'─'.repeat(10)}|${'─'.repeat(10)}\n` +
         entryLines;
 
       for (const manager of managers) {
