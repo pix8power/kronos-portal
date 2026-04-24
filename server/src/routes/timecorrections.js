@@ -56,17 +56,19 @@ router.post('/', auth, async (req, res) => {
       const io = req.app.get('io');
       const managers = await User.find({ role: { $in: ['admin', 'manager'] } });
 
+      const pad = (s, n) => String(s).padEnd(n);
+
       const entryLines = entries
         .filter((e) => e.date || e.clockIn || e.clockOut)
         .map((e) =>
-          `  ${e.date || '—'}  |  In: ${to12h(e.clockIn)}  |  Lunch Out: ${to12h(e.lunchOut)}  |  Lunch In: ${to12h(e.lunchIn)}  |  Out: ${to12h(e.clockOut)}${e.reason ? `  |  Reason: ${e.reason}` : ''}`
+          `${pad(e.date || '—', 11)}| ${pad(to12h(e.clockIn), 9)}| ${pad(to12h(e.lunchOut), 10)}| ${pad(to12h(e.lunchIn), 10)}| ${pad(to12h(e.clockOut), 9)}| ${e.reason || '—'}`
         )
         .join('\n');
 
       const msgContent =
         `📋 Time Correction Request from ${req.user.name}\n\n` +
-        `Date       | Clock In  | Lunch Out | Lunch In  | Clock Out | Reason\n` +
-        `──────────────────────────────────────────────────────────────\n` +
+        `${'Date'.padEnd(11)}| ${'In'.padEnd(9)}| ${'Lunch Out'.padEnd(10)}| ${'Lunch In'.padEnd(10)}| ${'Out'.padEnd(9)}| Reason\n` +
+        `${'─'.repeat(11)}|${'─'.repeat(10)}|${'─'.repeat(11)}|${'─'.repeat(11)}|${'─'.repeat(10)}|${'─'.repeat(10)}\n` +
         entryLines;
 
       for (const manager of managers) {
