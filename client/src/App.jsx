@@ -20,6 +20,7 @@ import ForgotPassword from './pages/ForgotPassword';
 import ResetPassword from './pages/ResetPassword';
 import Announcements from './pages/Announcements';
 import Profile from './pages/Profile';
+import Help from './pages/Help';
 import { useSessionTimeout } from './hooks/useSessionTimeout';
 import { usePushNotifications } from './hooks/usePushNotifications';
 import { useFcmNotifications } from './hooks/useFcmNotifications';
@@ -94,6 +95,7 @@ function AppRoutes() {
         <Route path="/announcements" element={<ProtectedRoute><AppLayout><Announcements /></AppLayout></ProtectedRoute>} />
         <Route path="/profile" element={<ProtectedRoute><AppLayout><Profile /></AppLayout></ProtectedRoute>} />
         <Route path="/profile/:id" element={<ProtectedRoute><AppLayout><Profile /></AppLayout></ProtectedRoute>} />
+        <Route path="/help" element={<ProtectedRoute><AppLayout><Help /></AppLayout></ProtectedRoute>} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
     </>

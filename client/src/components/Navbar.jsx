@@ -16,6 +16,7 @@ import {
   Moon,
   Megaphone,
   UserCircle,
+  HelpCircle,
 } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import { useSocket } from '../contexts/SocketContext';
@@ -201,6 +202,13 @@ export default function Navbar() {
                 </div>
               </div>
             </button>
+            <Link
+              to="/help"
+              className="p-2 text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-lg transition-colors"
+              title="Help"
+            >
+              <HelpCircle className="h-5 w-5" />
+            </Link>
             <button
               onClick={handleLogout}
               className="p-2 text-gray-500 hover:bg-red-50 hover:text-red-600 rounded-lg transition-colors"
@@ -296,6 +304,14 @@ export default function Navbar() {
               </div>
             </div>
           )}
+          <Link
+            to="/help"
+            onClick={() => setOpen(false)}
+            className="flex items-center gap-3 w-full px-3 py-2 text-sm font-medium text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-lg"
+          >
+            <HelpCircle className="h-4 w-4" />
+            Help & FAQ
+          </Link>
           <button
             onClick={toggleTheme}
             className="flex items-center gap-3 w-full px-3 py-2 text-sm font-medium text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-lg"
