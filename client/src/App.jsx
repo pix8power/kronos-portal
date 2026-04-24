@@ -23,6 +23,7 @@ import Profile from './pages/Profile';
 import { useSessionTimeout } from './hooks/useSessionTimeout';
 import { usePushNotifications } from './hooks/usePushNotifications';
 import { useFcmNotifications } from './hooks/useFcmNotifications';
+import InstallPrompt from './components/InstallPrompt';
 
 const ProtectedRoute = ({ children }) => {
   const { user, loading } = useAuth();
@@ -78,6 +79,7 @@ function AppRoutes() {
   return (
     <>
       <SessionWarningBanner />
+      <InstallPrompt />
       <Routes>
         <Route path="/login" element={user ? <Navigate to="/" replace /> : <Login />} />
         <Route path="/register" element={user ? <Navigate to="/" replace /> : <Register />} />
