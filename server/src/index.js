@@ -19,31 +19,8 @@ const { initSocket } = require('./socket');
 const { startShiftReminderJob } = require('./jobs/shiftReminders');
 const { startExpiryReminderJob } = require('./jobs/expiryReminders');
 
-// Allowed origins: web dev, Capacitor Android (http://localhost), Capacitor iOS (capacitor://localhost)
-const ALLOWED_ORIGINS = [
-  process.env.CLIENT_URL || 'http://localhost:5173',
-  'https://kronos-portal-production.up.railway.app',
-  'https://www.kronosportal.net',
-  'https://kronosportal.net',
-  'http://localhost:5173',
-  'http://localhost',
-  'https://localhost',
-  'capacitor://localhost',
-  'ionic://localhost',
-];
-
-// Also allow any private-network IP (192.168.x.x, 10.x.x.x, 172.16-31.x.x) for local testing
-const LOCAL_NETWORK_RE = /^https?:\/\/(192\.168\.|10\.|172\.(1[6-9]|2\d|3[01])\.)/;
-
 const corsOptions = {
-  origin: (origin, callback) => {
-    // Allow requests with no origin (mobile apps, curl, Postman)
-    if (!origin || ALLOWED_ORIGINS.includes(origin) || LOCAL_NETWORK_RE.test(origin)) {
-      callback(null, true);
-    } else {
-      callback(new Error(`CORS: origin ${origin} not allowed`));
-    }
-  },
+  origin: true,
   credentials: true,
 };
 
