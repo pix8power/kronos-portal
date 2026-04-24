@@ -23,6 +23,7 @@ import Profile from './pages/Profile';
 import Help from './pages/Help';
 import Landing from './pages/Landing';
 import Terms from './pages/Terms';
+import Privacy from './pages/Privacy';
 import { useSessionTimeout } from './hooks/useSessionTimeout';
 import { usePushNotifications } from './hooks/usePushNotifications';
 import { useFcmNotifications } from './hooks/useFcmNotifications';
@@ -102,6 +103,7 @@ function AppRoutes() {
         <Route path="/profile/:id" element={<ProtectedRoute><AppLayout><Profile /></AppLayout></ProtectedRoute>} />
         <Route path="/help" element={<ProtectedRoute><AppLayout><Help /></AppLayout></ProtectedRoute>} />
         <Route path="/terms" element={<Terms />} />
+        <Route path="/privacy" element={<Privacy />} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
     </>

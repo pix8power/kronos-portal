@@ -223,6 +223,8 @@ export default function Landing() {
         <span className="mx-2">·</span>
         <Link to="/terms" className="hover:text-gray-600 underline">Terms of Service</Link>
         <span className="mx-2">·</span>
+        <Link to="/privacy" className="hover:text-gray-600 underline">Privacy Policy</Link>
+        <span className="mx-2">·</span>
         <a href="mailto:pix8power@gmail.com" className="hover:text-gray-600 underline">Contact</a>
       </footer>
     </div>
