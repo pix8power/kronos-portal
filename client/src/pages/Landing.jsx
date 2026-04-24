@@ -220,6 +220,10 @@ export default function Landing() {
       {/* Footer */}
       <footer className="border-t border-gray-100 px-6 py-6 text-center text-xs text-gray-400">
         © {new Date().getFullYear()} KronosPortal. All rights reserved.
+        <span className="mx-2">·</span>
+        <Link to="/terms" className="hover:text-gray-600 underline">Terms of Service</Link>
+        <span className="mx-2">·</span>
+        <a href="mailto:pix8power@gmail.com" className="hover:text-gray-600 underline">Contact</a>
       </footer>
     </div>
   );
