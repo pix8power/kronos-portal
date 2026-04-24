@@ -21,6 +21,7 @@ import ResetPassword from './pages/ResetPassword';
 import Announcements from './pages/Announcements';
 import Profile from './pages/Profile';
 import Help from './pages/Help';
+import Landing from './pages/Landing';
 import { useSessionTimeout } from './hooks/useSessionTimeout';
 import { usePushNotifications } from './hooks/usePushNotifications';
 import { useFcmNotifications } from './hooks/useFcmNotifications';
@@ -86,7 +87,8 @@ function AppRoutes() {
         <Route path="/register" element={user ? <Navigate to="/" replace /> : <Register />} />
         <Route path="/forgot-password" element={user ? <Navigate to="/" replace /> : <ForgotPassword />} />
         <Route path="/reset-password/:token" element={user ? <Navigate to="/" replace /> : <ResetPassword />} />
-        <Route path="/" element={<ProtectedRoute><AppLayout><Dashboard /></AppLayout></ProtectedRoute>} />
+        <Route path="/" element={user ? <ProtectedRoute><AppLayout><Dashboard /></AppLayout></ProtectedRoute> : <Landing />} />
+        <Route path="/dashboard" element={<ProtectedRoute><AppLayout><Dashboard /></AppLayout></ProtectedRoute>} />
         <Route path="/schedule" element={<ProtectedRoute><AppLayout><Schedule /></AppLayout></ProtectedRoute>} />
         <Route path="/messages" element={<ProtectedRoute><AppLayout><Messages /></AppLayout></ProtectedRoute>} />
         <Route path="/employees" element={<ProtectedRoute><AppLayout><Employees /></AppLayout></ProtectedRoute>} />
