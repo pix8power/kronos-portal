@@ -22,6 +22,10 @@ const { startExpiryReminderJob } = require('./jobs/expiryReminders');
 // Allowed origins: web dev, Capacitor Android (http://localhost), Capacitor iOS (capacitor://localhost)
 const ALLOWED_ORIGINS = [
   process.env.CLIENT_URL || 'http://localhost:5173',
+  'https://kronos-portal-production.up.railway.app',
+  'https://www.kronosportal.net',
+  'https://kronosportal.net',
+  'http://localhost:5173',
   'http://localhost',
   'https://localhost',
   'capacitor://localhost',
