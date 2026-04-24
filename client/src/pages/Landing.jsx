@@ -184,28 +184,6 @@ export default function Landing() {
         </div>
       </section>
 
-      {/* Pricing */}
-      <section className="px-6 py-20">
-        <div className="max-w-md mx-auto text-center">
-          <h2 className="text-2xl font-bold text-gray-900 mb-2">Simple pricing</h2>
-          <p className="text-gray-500 mb-8 text-sm">No contracts. No hidden fees. Cancel anytime.</p>
-          <div className="bg-white border-2 border-blue-600 rounded-2xl p-8 shadow-lg">
-            <p className="text-sm font-semibold text-blue-600 uppercase tracking-wider mb-2">Per User</p>
-            <div className="flex items-end justify-center gap-1 mb-1">
-              <span className="text-5xl font-extrabold text-gray-900">$2.50</span>
-              <span className="text-gray-500 mb-2">/user/month</span>
-            </div>
-            <p className="text-xs text-gray-400 mb-6">A 15-person team = $37.50/month</p>
-            <a
-              href="mailto:pix8power@gmail.com?subject=KronosPortal Demo Request"
-              className="block w-full bg-blue-600 hover:bg-blue-700 text-white font-semibold py-3 rounded-xl transition-colors text-sm"
-            >
-              Get Started
-            </a>
-          </div>
-        </div>
-      </section>
-
       {/* Contact Form */}
       <section className="bg-gray-50 px-6 py-20 border-t border-gray-100">
         <div className="max-w-xl mx-auto">
