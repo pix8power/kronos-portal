@@ -145,22 +145,6 @@ router.patch('/:id', auth, async (req, res) => {
   }
 });
 
-// DELETE — employee deletes own pending request
-router.delete('/:id', auth, async (req, res) => {
-  try {
-    const request = await TimeCorrection.findOne({
-      _id: req.params.id,
-      employee: req.user._id,
-      status: 'pending',
-    });
-    if (!request) return res.status(404).json({ message: 'Request not found or already reviewed' });
-    await request.deleteOne();
-    res.json({ message: 'Request deleted' });
-  } catch (err) {
-    res.status(500).json({ message: err.message });
-  }
-});
-
 // GET /timecorrections/export — CSV download (admin/manager only)
 router.get('/export', auth, async (req, res) => {
   try {
@@ -169,17 +153,23 @@ router.get('/export', auth, async (req, res) => {
       return res.status(403).json({ message: 'Access denied.' });
     }
 
-    const weeks = parseInt(req.query.weeks, 10) || 2;
-    const since = new Date();
-    since.setDate(since.getDate() - weeks * 7);
+    const weeks = parseInt(req.query.weeks, 10) || 0;
+    const query = {};
+    if (weeks > 0) {
+      const since = new Date();
+      since.setDate(since.getDate() - weeks * 7);
+      query.createdAt = { $gte: since };
+    }
 
-    const requests = await TimeCorrection.find({ createdAt: { $gte: since } })
+    const requests = await TimeCorrection.find(query)
       .populate('employee', 'name email position department')
       .populate('reviewedBy', 'name')
       .sort({ createdAt: -1 });
 
     const esc = (v) => `"${String(v ?? '').replace(/"/g, '""')}"`;
-    const rows = ['Employee,Email,Position,Department,Date,Clock In,Lunch Out,Lunch In,Clock Out,Entry Reason,Status,Reviewed By,Review Note,Submitted At'];
+    const rows = [
+      'Employee,Email,Position,Department,Date,Clock In,Lunch Out,Lunch In,Clock Out,Entry Reason,Status,Reviewed By,Review Note,Submitted At',
+    ];
 
     for (const r of requests) {
       for (const e of r.entries) {
@@ -202,10 +192,26 @@ router.get('/export', auth, async (req, res) => {
       }
     }
 
-    const filename = `time-corrections-${new Date().toISOString().slice(0, 10)}.csv`;
-    res.setHeader('Content-Type', 'text/csv');
-    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
-    res.send(rows.join('\n'));
+    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+    res.setHeader('Content-Disposition', `attachment; filename="time-corrections-${new Date().toISOString().slice(0, 10)}.csv"`);
+    res.send(rows.join('\r\n'));
+  } catch (err) {
+    console.error('Export error:', err.message);
+    res.status(500).json({ message: err.message });
+  }
+});
+
+// DELETE — employee deletes own pending request
+router.delete('/:id', auth, async (req, res) => {
+  try {
+    const request = await TimeCorrection.findOne({
+      _id: req.params.id,
+      employee: req.user._id,
+      status: 'pending',
+    });
+    if (!request) return res.status(404).json({ message: 'Request not found or already reviewed' });
+    await request.deleteOne();
+    res.json({ message: 'Request deleted' });
   } catch (err) {
     res.status(500).json({ message: err.message });
   }

@@ -80,21 +80,32 @@ function TimeCorrectionTab({ user }) {
   };
   useEffect(() => { load(); }, [filterStatus]);
 
-  const handleExport = () => {
+  const [exportWeeks, setExportWeeks] = useState('2');
+
+  const handleExport = async () => {
     const token = localStorage.getItem('token');
-    const url = `${import.meta.env.VITE_API_URL || '/api'}/timecorrections/export?weeks=2`;
-    fetch(url, { headers: { Authorization: `Bearer ${token}` } })
-      .then((r) => r.blob())
-      .then((blob) => {
-        const blobUrl = URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = blobUrl;
-        a.download = `time-corrections-${new Date().toISOString().slice(0, 10)}.csv`;
-        document.body.appendChild(a);
-        a.click();
-        document.body.removeChild(a);
-        URL.revokeObjectURL(blobUrl);
-      });
+    const weeks = exportWeeks === 'all' ? 0 : exportWeeks;
+    const url = `${import.meta.env.VITE_API_URL || '/api'}/timecorrections/export?weeks=${weeks}`;
+    try {
+      const r = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
+      if (!r.ok) {
+        const err = await r.json().catch(() => ({ message: 'Export failed' }));
+        alert(err.message || 'Export failed');
+        return;
+      }
+      const blob = await r.blob();
+      if (blob.size < 10) { alert('No time correction data found for this period.'); return; }
+      const blobUrl = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = blobUrl;
+      a.download = `time-corrections-${new Date().toISOString().slice(0, 10)}.csv`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(blobUrl);
+    } catch (err) {
+      alert('Export failed: ' + err.message);
+    }
   };
 
   const updateEntry = (i, field, val) =>
@@ -293,14 +304,25 @@ function TimeCorrectionTab({ user }) {
         </div>
         <div className="flex items-center gap-2 flex-wrap">
           {isAdmin && (
-            <button
-              onClick={handleExport}
-              className="flex items-center gap-1.5 border border-gray-300 text-gray-600 hover:bg-gray-50 px-3 py-2 rounded-lg text-sm font-medium transition-colors"
-              title="Export last 2 weeks to CSV"
-            >
-              <Download className="h-4 w-4" />
-              Export CSV
-            </button>
+            <div className="flex items-center gap-1">
+              <select
+                value={exportWeeks}
+                onChange={(e) => setExportWeeks(e.target.value)}
+                className="px-2 py-2 text-sm border border-gray-300 rounded-l-lg focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white"
+              >
+                <option value="2">Last 2 wks</option>
+                <option value="4">Last 4 wks</option>
+                <option value="8">Last 8 wks</option>
+                <option value="all">All time</option>
+              </select>
+              <button
+                onClick={handleExport}
+                className="flex items-center gap-1.5 border border-l-0 border-gray-300 text-gray-600 hover:bg-gray-50 px-3 py-2 rounded-r-lg text-sm font-medium transition-colors"
+              >
+                <Download className="h-4 w-4" />
+                Export
+              </button>
+            </div>
           )}
           <select
             value={filterStatus}
