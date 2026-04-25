@@ -95,14 +95,17 @@ function TimeCorrectionTab({ user }) {
       }
       const blob = await r.blob();
       if (blob.size < 10) { alert('No time correction data found for this period.'); return; }
-      const blobUrl = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = blobUrl;
-      a.download = `time-corrections-${new Date().toISOString().slice(0, 10)}.csv`;
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      URL.revokeObjectURL(blobUrl);
+      const filename = `time-corrections-${new Date().toISOString().slice(0, 10)}.csv`;
+      const reader = new FileReader();
+      reader.onload = () => {
+        const a = document.createElement('a');
+        a.href = reader.result;
+        a.download = filename;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+      };
+      reader.readAsDataURL(blob);
     } catch (err) {
       alert('Export failed: ' + err.message);
     }
