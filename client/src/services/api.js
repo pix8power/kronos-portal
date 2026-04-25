@@ -93,7 +93,8 @@ export const exchangeAPI = {
   getAll: () => api.get('/schedules/exchanges'),
   create: (data) => api.post('/schedules/exchanges', data),
   respond: (id, data) => api.post(`/schedules/exchanges/${id}/respond`, data),
-  approve: (id, data) => api.patch(`/schedules/exchanges/${id}`, data),
+  propose: (id, data) => api.post(`/schedules/exchanges/${id}/propose`, data),
+  review: (id, data) => api.patch(`/schedules/exchanges/${id}`, data),
   cancel: (id) => api.delete(`/schedules/exchanges/${id}`),
 };
 

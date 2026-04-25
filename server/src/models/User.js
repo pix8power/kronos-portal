@@ -21,8 +21,9 @@ const userSchema = new mongoose.Schema(
     resetPasswordExpires: { type: Date },
     mustChangePassword: { type: Boolean, default: false },
     // Profile extras
-    hireDate:   { type: String, default: '' },
-    bio:        { type: String, default: '' },
+    hireDate:      { type: String, default: '' },
+    seniorityDate: { type: String, default: '' },
+    bio:           { type: String, default: '' },
     licenseNumber: { type: String, default: '' },
     licenseExpiry:  { type: String, default: '' },
     blsCprExpiry:   { type: String, default: '' },

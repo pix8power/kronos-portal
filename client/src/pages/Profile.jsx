@@ -129,6 +129,7 @@ export default function Profile() {
         setForm({
           bio: res.data.bio || '',
           hireDate: res.data.hireDate || '',
+          seniorityDate: res.data.seniorityDate || '',
           licenseNumber: res.data.licenseNumber || '',
           licenseExpiry: res.data.licenseExpiry || '',
           blsCprExpiry: res.data.blsCprExpiry || '',
@@ -296,6 +297,11 @@ export default function Profile() {
             <div>
               <label className="text-xs font-medium text-gray-500 dark:text-gray-400 mb-1 block">Hire Date</label>
               <input type="date" value={form.hireDate} onChange={(e) => setForm({ ...form, hireDate: e.target.value })}
+                className="w-full px-3 py-2 text-sm border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500" />
+            </div>
+            <div>
+              <label className="text-xs font-medium text-gray-500 dark:text-gray-400 mb-1 block">Seniority Date</label>
+              <input type="date" value={form.seniorityDate} onChange={(e) => setForm({ ...form, seniorityDate: e.target.value })}
                 className="w-full px-3 py-2 text-sm border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500" />
             </div>
           </div>

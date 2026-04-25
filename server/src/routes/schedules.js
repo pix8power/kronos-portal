@@ -427,19 +427,6 @@ router.post('/exchanges/:id/respond', auth, async (req, res) => {
     if (exchange.requestedBy.toString() === req.user._id.toString()) return res.status(400).json({ message: 'Cannot respond to your own request' });
     const io = req.app.get('io');
 
-    if (response === 'declined') {
-      exchange.status = 'cancelled';
-      await exchange.save();
-      await notify(io, exchange.requestedBy, {
-        type: 'exchange_declined',
-        title: 'Shift Exchange Declined',
-        body: `${req.user.name} is not available to cover your shift on ${exchange.date}.`,
-        link: '/',
-      });
-      const populated = await ShiftExchange.findById(exchange._id).populate(EXCHANGE_POPULATE);
-      return res.json(populated);
-    }
-
     const idx = exchange.responses.findIndex((r) => r.employee.toString() === req.user._id.toString());
     if (idx >= 0) {
       exchange.responses[idx].response = response;
@@ -450,12 +437,14 @@ router.post('/exchanges/:id/respond', auth, async (req, res) => {
     }
     await exchange.save();
 
-    await notify(io, exchange.requestedBy, {
-      type: 'exchange_response',
-      title: 'Someone can cover your shift',
-      body: `${req.user.name} is available to cover your shift on ${exchange.date}.`,
-      link: '/',
-    });
+    if (response === 'available') {
+      await notify(io, exchange.requestedBy, {
+        type: 'exchange_response',
+        title: 'Someone can cover your shift',
+        body: `${req.user.name} is available to cover your shift on ${exchange.date}.`,
+        link: '/',
+      });
+    }
 
     const populated = await ShiftExchange.findById(exchange._id).populate(EXCHANGE_POPULATE);
     res.json(populated);
@@ -464,30 +453,97 @@ router.post('/exchanges/:id/respond', auth, async (req, res) => {
   }
 });
 
-router.patch('/exchanges/:id', auth, isAdmin, async (req, res) => {
+// Employee proposes a specific responder → puts exchange in pending_approval
+router.post('/exchanges/:id/propose', auth, async (req, res) => {
   try {
-    const { acceptedBy } = req.body;
+    const { proposedAcceptedBy } = req.body;
     const exchange = await ShiftExchange.findById(req.params.id);
     if (!exchange || exchange.status !== 'open') return res.status(400).json({ message: 'Exchange not open' });
-    await Shift.findByIdAndUpdate(exchange.shift, { employee: acceptedBy });
-    exchange.acceptedBy = acceptedBy; exchange.status = 'approved';
+    if (exchange.requestedBy.toString() !== req.user._id.toString()) return res.status(403).json({ message: 'Only the requestor can propose' });
+
+    exchange.proposedAcceptedBy = proposedAcceptedBy;
+    exchange.status = 'pending_approval';
     await exchange.save();
 
     const io = req.app.get('io');
+    const proposedUser = await User.findById(proposedAcceptedBy, 'name');
+    const managers = await User.find({ role: { $in: ['admin', 'manager'] } }, '_id');
+    for (const mgr of managers) {
+      const mgrId = mgr._id.toString();
+      await notify(io, mgrId, {
+        type: 'exchange_pending',
+        title: 'Shift Swap Needs Approval',
+        body: `${req.user.name} wants to swap their shift on ${exchange.date} with ${proposedUser?.name || 'a colleague'}.`,
+        link: '/',
+      });
+      sendPush(mgrId, {
+        title: 'Shift Swap Needs Approval',
+        body: `${req.user.name} proposed a shift swap on ${exchange.date}.`,
+        icon: '/icon-192.png',
+        badge: '/icon-192.png',
+        data: { url: '/' },
+      }).catch(() => {});
+    }
+
+    const populated = await ShiftExchange.findById(exchange._id).populate([...EXCHANGE_POPULATE, { path: 'proposedAcceptedBy', select: 'name color' }]);
+    res.json(populated);
+  } catch (err) {
+    res.status(500).json({ message: err.message });
+  }
+});
+
+router.patch('/exchanges/:id', auth, isAdmin, async (req, res) => {
+  try {
+    const { action, managerNote } = req.body;
+    const exchange = await ShiftExchange.findById(req.params.id).populate('proposedAcceptedBy', 'name');
+    if (!exchange) return res.status(404).json({ message: 'Exchange not found' });
+    if (!['pending_approval', 'open'].includes(exchange.status)) {
+      return res.status(400).json({ message: 'Exchange cannot be reviewed in its current state' });
+    }
+
+    const io = req.app.get('io');
+
+    if (action === 'deny') {
+      exchange.status = 'open';
+      exchange.proposedAcceptedBy = null;
+      exchange.managerNote = managerNote || '';
+      await exchange.save();
+      await notify(io, exchange.requestedBy, {
+        type: 'exchange_denied',
+        title: 'Swap Request Not Approved',
+        body: managerNote
+          ? `Manager declined the swap for ${exchange.date}: "${managerNote}"`
+          : `Your proposed shift swap for ${exchange.date} was not approved. You may choose another colleague.`,
+        link: '/',
+      });
+      const populated = await ShiftExchange.findById(exchange._id).populate([...EXCHANGE_POPULATE, { path: 'proposedAcceptedBy', select: 'name color' }]);
+      return res.json(populated);
+    }
+
+    // approve — use proposedAcceptedBy if set, otherwise fall back to legacy acceptedBy body param
+    const acceptedBy = exchange.proposedAcceptedBy?._id || req.body.acceptedBy;
+    if (!acceptedBy) return res.status(400).json({ message: 'No proposed employee to approve' });
+
+    await Shift.findByIdAndUpdate(exchange.shift, { employee: acceptedBy });
+    exchange.acceptedBy = acceptedBy;
+    exchange.status = 'approved';
+    exchange.managerNote = managerNote || '';
+    await exchange.save();
+
     await notify(io, exchange.requestedBy, {
       type: 'exchange_approved',
-      title: 'Shift Exchange Approved',
-      body: `Your shift exchange request for ${exchange.date} has been approved.`,
+      title: 'Shift Swap Approved',
+      body: `Your shift exchange for ${exchange.date} has been approved by management.`,
       link: '/',
     });
     await notify(io, acceptedBy, {
       type: 'shift_assigned',
-      title: 'Shift Exchange — You\'re Covering',
-      body: `You have been assigned to cover a shift on ${exchange.date}.`,
+      title: "You're Covering a Shift",
+      body: `You've been approved to cover a shift on ${exchange.date}.`,
       link: '/schedule',
     });
 
-    const populated = await ShiftExchange.findById(exchange._id).populate(EXCHANGE_POPULATE);
+    const populated = await ShiftExchange.findById(exchange._id).populate([...EXCHANGE_POPULATE, { path: 'proposedAcceptedBy', select: 'name color' }]);
     res.json(populated);
   } catch (err) {
     res.status(500).json({ message: err.message });

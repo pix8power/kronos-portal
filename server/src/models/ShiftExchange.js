@@ -9,9 +9,11 @@ const shiftExchangeSchema = new mongoose.Schema(
     note: { type: String, default: '' },
     status: {
       type: String,
-      enum: ['open', 'approved', 'cancelled'],
+      enum: ['open', 'pending_approval', 'approved', 'denied', 'cancelled'],
       default: 'open',
     },
+    proposedAcceptedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
+    managerNote: { type: String, default: '' },
     responses: [
       {
         employee: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },

@@ -959,10 +959,22 @@ function ShiftExchangeTab({ user }) {
     });
   };
 
-  const handleApprove = async (exchangeId, acceptedById) => {
-    setApproving(exchangeId + acceptedById);
+  const handlePropose = async (exchangeId, proposedAcceptedBy) => {
+    setApproving(exchangeId + proposedAcceptedBy);
     try {
-      const res = await exchangeAPI.approve(exchangeId, { acceptedBy: acceptedById });
+      const res = await exchangeAPI.propose(exchangeId, { proposedAcceptedBy });
+      setRequests((prev) => prev.map((e) => (e._id === exchangeId ? res.data : e)));
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setApproving(null);
+    }
+  };
+
+  const handleManagerReview = async (exchangeId, action, managerNote = '') => {
+    setApproving(exchangeId + action);
+    try {
+      const res = await exchangeAPI.review(exchangeId, { action, managerNote });
       setRequests((prev) => prev.map((e) => (e._id === exchangeId ? res.data : e)));
     } catch (err) {
       console.error(err);
@@ -990,9 +1002,19 @@ function ShiftExchangeTab({ user }) {
     exchange.responses?.filter((r) => r.response === 'available') || [];
 
   const STATUS_CLS = {
-    open:      'bg-yellow-100 text-yellow-700',
-    approved:  'bg-green-100 text-green-700',
-    cancelled: 'bg-gray-100 text-gray-500',
+    open:             'bg-yellow-100 text-yellow-700',
+    pending_approval: 'bg-blue-100 text-blue-700',
+    approved:         'bg-green-100 text-green-700',
+    denied:           'bg-red-100 text-red-600',
+    cancelled:        'bg-gray-100 text-gray-500',
+  };
+
+  const STATUS_LABEL = {
+    open:             'Open',
+    pending_approval: 'Awaiting Approval',
+    approved:         'Approved',
+    denied:           'Denied',
+    cancelled:        'Cancelled',
   };
 
   if (loading) return (
@@ -1292,8 +1314,8 @@ function ShiftExchangeTab({ user }) {
                       </div>
                     </div>
                     <div className="flex items-center gap-2">
-                      <span className={`text-xs font-semibold px-2.5 py-1 rounded-full capitalize ${STATUS_CLS[exchange.status]}`}>
-                        {exchange.status}
+                      <span className={`text-xs font-semibold px-2.5 py-1 rounded-full ${STATUS_CLS[exchange.status]}`}>
+                        {STATUS_LABEL[exchange.status] || exchange.status}
                       </span>
                       {!isAdmin && exchange.status === 'open' && (
                         <button
@@ -1320,6 +1342,54 @@ function ShiftExchangeTab({ user }) {
                       </div>
                     )}
 
+                    {exchange.status === 'pending_approval' && (
+                      <div className="space-y-2">
+                        {exchange.proposedAcceptedBy && (
+                          <div className="flex items-center gap-2 text-sm text-gray-700">
+                            <div className="w-5 h-5 rounded-full flex items-center justify-center text-white text-xs font-bold flex-shrink-0"
+                              style={{ backgroundColor: exchange.proposedAcceptedBy?.color || '#3B82F6' }}>
+                              {exchange.proposedAcceptedBy?.name?.split(' ').map((n) => n[0]).join('').slice(0, 2)}
+                            </div>
+                            <span className="text-xs text-gray-700">Proposed swap with <strong>{exchange.proposedAcceptedBy?.name}</strong></span>
+                          </div>
+                        )}
+                        {isAdmin ? (
+                          <div className="flex gap-2 pt-1">
+                            <button
+                              onClick={() => handleManagerReview(exchange._id, 'approve')}
+                              disabled={!!approving}
+                              className="flex items-center gap-1 text-xs bg-green-600 hover:bg-green-700 disabled:opacity-50 text-white px-3 py-1.5 rounded-lg font-medium"
+                            >
+                              <Check className="h-3.5 w-3.5" />
+                              {approving === exchange._id + 'approve' ? '…' : 'Approve'}
+                            </button>
+                            <button
+                              onClick={() => {
+                                const note = prompt('Reason for denying (optional):') ?? '';
+                                handleManagerReview(exchange._id, 'deny', note);
+                              }}
+                              disabled={!!approving}
+                              className="flex items-center gap-1 text-xs bg-red-50 hover:bg-red-100 text-red-600 border border-red-200 disabled:opacity-50 px-3 py-1.5 rounded-lg font-medium"
+                            >
+                              <X className="h-3.5 w-3.5" />
+                              {approving === exchange._id + 'deny' ? '…' : 'Deny'}
+                            </button>
+                          </div>
+                        ) : (
+                          <p className="text-xs text-blue-600">Waiting for manager approval…</p>
+                        )}
+                        {exchange.managerNote && (
+                          <p className="text-xs text-gray-500 italic">Note: "{exchange.managerNote}"</p>
+                        )}
+                      </div>
+                    )}
+
+                    {exchange.status === 'denied' && (
+                      <div className="text-xs text-red-600">
+                        Swap not approved.{exchange.managerNote ? ` "${exchange.managerNote}"` : ' You may propose another colleague.'}
+                      </div>
+                    )}
+
                     {exchange.status === 'open' && (
                       responders.length === 0 ? (
                         <p className="text-xs text-gray-400">Waiting for colleagues to respond…</p>
@@ -1330,10 +1400,7 @@ function ShiftExchangeTab({ user }) {
                           </p>
                           <div className="flex flex-wrap gap-2">
                             {responders.map((r) => (
-                              <div
-                                key={r.employee?._id}
-                                className="bg-green-50 border border-green-200 rounded-lg px-3 py-2"
-                              >
+                              <div key={r.employee?._id} className="bg-green-50 border border-green-200 rounded-lg px-3 py-2">
                                 <div className="flex items-center gap-2">
                                   <div
                                     className="w-5 h-5 rounded-full flex items-center justify-center text-white text-xs font-bold flex-shrink-0"
@@ -1342,13 +1409,23 @@ function ShiftExchangeTab({ user }) {
                                     {r.employee?.name?.split(' ').map((n) => n[0]).join('').slice(0, 2)}
                                   </div>
                                   <span className="text-xs font-medium text-gray-800">{r.employee?.name}</span>
+                                  {/* Employee proposes; admin directly approves */}
+                                  {!isAdmin && (
+                                    <button
+                                      onClick={() => handlePropose(exchange._id, r.employee._id)}
+                                      disabled={!!approving}
+                                      className="ml-1 text-xs bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white px-2 py-0.5 rounded font-medium"
+                                    >
+                                      {approving === exchange._id + r.employee._id ? '…' : 'Propose'}
+                                    </button>
+                                  )}
                                   {isAdmin && (
                                     <button
-                                      onClick={() => handleApprove(exchange._id, r.employee._id)}
+                                      onClick={() => handleManagerReview(exchange._id, 'approve')}
                                       disabled={!!approving}
                                       className="ml-1 text-xs bg-green-600 hover:bg-green-700 disabled:opacity-50 text-white px-2 py-0.5 rounded font-medium"
                                     >
-                                      {approving === exchange._id + r.employee._id ? '…' : 'Approve'}
+                                      {approving === exchange._id + 'approve' ? '…' : 'Approve'}
                                     </button>
                                   )}
                                 </div>

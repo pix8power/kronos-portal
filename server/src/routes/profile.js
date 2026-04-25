@@ -91,7 +91,7 @@ router.get('/:id', auth, async (req, res) => {
 
 // PATCH update profile fields
 router.patch('/', auth, async (req, res) => {
-  const allowed = ['bio', 'hireDate', 'licenseNumber', 'licenseExpiry', 'blsCprExpiry', 'certifications', 'phone'];
+  const allowed = ['bio', 'hireDate', 'seniorityDate', 'licenseNumber', 'licenseExpiry', 'blsCprExpiry', 'certifications', 'phone'];
   const updates = {};
   for (const key of allowed) { if (req.body[key] !== undefined) updates[key] = req.body[key]; }
   try {
