@@ -4,7 +4,7 @@ import { format, startOfWeek, endOfWeek, addWeeks, addDays, eachDayOfInterval, p
 import {
   Calendar, Clock, TrendingUp, ChevronRight, Users,
   AlarmClockPlus, Plus, Check, X, Trash2, AlertCircle, ArrowLeftRight,
-  UserCircle, ChevronRight as Arrow, Download,
+  UserCircle, ChevronRight as Arrow, Download, Printer, Share2,
 } from 'lucide-react';
 import { schedulesAPI, timeCorrectionAPI, exchangeAPI, profileAPI } from '../services/api';
 import { useWebAuthn } from '../hooks/useWebAuthn';
@@ -106,6 +106,84 @@ function TimeCorrectionTab({ user }) {
       if (!v) loadReport(reportWeeks);
       return !v;
     });
+  };
+
+  const buildReportCSV = () => {
+    const esc = (v) => `"${String(v ?? '').replace(/"/g, '""')}"`;
+    const rows = ['Employee,Date,Clock In,Lunch Out,Lunch In,Clock Out,Reason,Status,Reviewed By'];
+    for (const r of reportData) {
+      for (const e of r.entries) {
+        rows.push([
+          esc(r.employee?.name),
+          esc(e.date),
+          esc(to12h(e.clockIn)),
+          esc(to12h(e.lunchOut)),
+          esc(to12h(e.lunchIn)),
+          esc(to12h(e.clockOut)),
+          esc(e.reason),
+          esc(r.status),
+          esc(r.reviewedBy?.name),
+        ].join(','));
+      }
+    }
+    return rows.join('\r\n');
+  };
+
+  const handlePrint = () => {
+    const label = reportWeeks === 'all' ? 'All Time' : `Last ${reportWeeks} Weeks`;
+    const rows = reportData.flatMap((r) =>
+      r.entries.map((e) => `
+        <tr>
+          <td>${r.employee?.name || ''}</td>
+          <td>${e.date || ''}</td>
+          <td>${to12h(e.clockIn)}</td>
+          <td>${to12h(e.lunchOut)}</td>
+          <td>${to12h(e.lunchIn)}</td>
+          <td>${to12h(e.clockOut)}</td>
+          <td>${e.reason || ''}</td>
+          <td>${r.status}</td>
+          <td>${r.reviewedBy?.name || ''}</td>
+        </tr>`)
+    ).join('');
+
+    const win = window.open('', '_blank');
+    win.document.write(`<!DOCTYPE html><html><head>
+      <title>Time Correction Report</title>
+      <style>
+        body { font-family: Arial, sans-serif; font-size: 11px; margin: 20px; }
+        h2 { font-size: 14px; margin-bottom: 4px; }
+        p { font-size: 10px; color: #666; margin-bottom: 12px; }
+        table { border-collapse: collapse; width: 100%; }
+        th { background: #f3f4f6; text-align: left; padding: 5px 8px; font-size: 10px; text-transform: uppercase; border: 1px solid #e5e7eb; }
+        td { padding: 4px 8px; border: 1px solid #e5e7eb; }
+        tr:nth-child(even) td { background: #f9fafb; }
+      </style>
+    </head><body>
+      <h2>Time Correction Report — ${label}</h2>
+      <p>Generated ${new Date().toLocaleDateString()} · ${reportData.length} requests · ${reportData.reduce((n, r) => n + r.entries.length, 0)} entries</p>
+      <table>
+        <thead><tr>
+          <th>Employee</th><th>Date</th><th>In</th><th>Lunch Out</th><th>Lunch In</th><th>Out</th><th>Reason</th><th>Status</th><th>Reviewed By</th>
+        </tr></thead>
+        <tbody>${rows}</tbody>
+      </table>
+    </body></html>`);
+    win.document.close();
+    win.focus();
+    win.print();
+  };
+
+  const handleShareReport = async () => {
+    const csv = buildReportCSV();
+    const filename = `time-corrections-${new Date().toISOString().slice(0, 10)}.csv`;
+    const file = new File([csv], filename, { type: 'text/csv' });
+    if (navigator.canShare && navigator.canShare({ files: [file] })) {
+      try { await navigator.share({ files: [file], title: 'Time Correction Report' }); }
+      catch { /* cancelled */ }
+    } else {
+      await navigator.clipboard.writeText(csv);
+      alert('Report copied to clipboard.');
+    }
   };
 
   const handleExport = async () => {
@@ -402,25 +480,44 @@ function TimeCorrectionTab({ user }) {
       {/* ── Inline report table (admin) ─────────────────────────────────────── */}
       {isAdmin && showReport && (
         <div className="bg-white rounded-xl border border-gray-200 shadow-sm mb-6 overflow-hidden">
-          <div className="px-4 py-3 border-b border-gray-100 flex items-center justify-between">
-            <h3 className="font-semibold text-gray-800 text-sm">
-              Time Correction Report
+          <div className="px-4 py-3 border-b border-gray-100 flex flex-wrap items-center justify-between gap-2">
+            <div>
+              <h3 className="font-semibold text-gray-800 text-sm">
+                Time Correction Report
+                {!reportLoading && (
+                  <span className="ml-2 text-xs font-normal text-gray-400">
+                    {reportData.reduce((n, r) => n + r.entries.length, 0)} entries · {reportData.length} requests
+                  </span>
+                )}
+              </h3>
               {!reportLoading && (
-                <span className="ml-2 text-xs font-normal text-gray-400">
-                  {reportData.reduce((n, r) => n + r.entries.length, 0)} entries · {reportData.length} requests
-                </span>
+                <div className="flex gap-2 mt-1">
+                  {['pending','approved','denied'].map((s) => {
+                    const count = reportData.filter((r) => r.status === s).length;
+                    const cls = s === 'pending' ? 'bg-yellow-100 text-yellow-700' : s === 'approved' ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-600';
+                    return count > 0 ? (
+                      <span key={s} className={`text-xs font-semibold px-2 py-0.5 rounded-full capitalize ${cls}`}>{count} {s}</span>
+                    ) : null;
+                  })}
+                </div>
               )}
-            </h3>
-            {/* Summary badges */}
-            {!reportLoading && (
-              <div className="flex gap-2">
-                {['pending','approved','denied'].map((s) => {
-                  const count = reportData.filter((r) => r.status === s).length;
-                  const cls = s === 'pending' ? 'bg-yellow-100 text-yellow-700' : s === 'approved' ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-600';
-                  return count > 0 ? (
-                    <span key={s} className={`text-xs font-semibold px-2 py-0.5 rounded-full capitalize ${cls}`}>{count} {s}</span>
-                  ) : null;
-                })}
+            </div>
+            {!reportLoading && reportData.length > 0 && (
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={handlePrint}
+                  className="flex items-center gap-1.5 text-xs text-gray-600 hover:text-gray-900 border border-gray-200 hover:bg-gray-50 px-3 py-1.5 rounded-lg transition-colors font-medium"
+                >
+                  <Printer className="h-3.5 w-3.5" />
+                  Print
+                </button>
+                <button
+                  onClick={handleShareReport}
+                  className="flex items-center gap-1.5 text-xs text-blue-600 hover:text-blue-700 border border-blue-200 hover:bg-blue-50 px-3 py-1.5 rounded-lg transition-colors font-medium"
+                >
+                  <Share2 className="h-3.5 w-3.5" />
+                  Share
+                </button>
               </div>
             )}
           </div>
