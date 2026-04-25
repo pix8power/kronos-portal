@@ -149,7 +149,7 @@ function TimeCorrectionTab({ user }) {
       {/* Password confirmation modal */}
       {pendingEntries && (
         <div className="fixed inset-0 z-[999] bg-black/60 flex items-center justify-center px-4">
-          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md p-8">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md p-6 max-h-[90vh] overflow-y-auto">
             <h2 className="text-lg font-bold text-gray-900 mb-2">Confirm Submission</h2>
             <p className="text-sm text-gray-600 leading-relaxed mb-5">
               By submitting this time correction request, I certify under penalty of applicable law that the information provided is true, accurate, and complete to the best of my knowledge. I understand that submitting false, misleading, or fraudulent time records may result in disciplinary action, termination of employment, and/or legal consequences. I acknowledge that this submission constitutes an electronic record and carries the same legal weight as a handwritten signature.
