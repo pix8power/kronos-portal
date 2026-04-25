@@ -5,8 +5,9 @@ import {
   Link2, Plus, X, AlertTriangle, Camera, Loader2, Heart, Eye,
   Image, File,
 } from 'lucide-react';
-import { profileAPI } from '../services/api';
+import { profileAPI, webAuthnAPI } from '../services/api';
 import { useAuth } from '../contexts/AuthContext';
+import { useWebAuthn } from '../hooks/useWebAuthn';
 
 const WARN_DAYS = 60;
 
@@ -475,6 +476,9 @@ export default function Profile() {
         <DocViewer doc={viewingDoc} onClose={() => setViewingDoc(null)} />
       )}
 
+      {/* Passkeys */}
+      {isOwn && <PasskeySection />}
+
       {/* Calendar Sync */}
       {isOwn && (
         <div className="bg-white dark:bg-gray-900 rounded-2xl shadow-sm border border-gray-100 dark:border-gray-700 p-5 space-y-3">
@@ -494,6 +498,86 @@ export default function Profile() {
           )}
         </div>
       )}
+    </div>
+  );
+}
+
+function PasskeySection() {
+  const { isSupported, registerPasskey } = useWebAuthn();
+  const [credentials, setCredentials] = useState([]);
+  const [registering, setRegistering] = useState(false);
+  const [regError, setRegError] = useState('');
+  const [regSuccess, setRegSuccess] = useState('');
+
+  const load = () => {
+    webAuthnAPI.getCredentials().then((r) => setCredentials(r.data)).catch(() => {});
+  };
+  useEffect(() => { load(); }, []);
+
+  const handleRegister = async () => {
+    setRegistering(true);
+    setRegError('');
+    setRegSuccess('');
+    try {
+      await registerPasskey();
+      setRegSuccess('Passkey registered! You can now use biometrics to confirm time corrections.');
+      load();
+    } catch (err) {
+      if (err?.name === 'NotAllowedError') {
+        setRegError('Registration was cancelled.');
+      } else if (err?.response?.data?.message) {
+        setRegError(err.response.data.message);
+      } else {
+        setRegError('Registration failed. Please try again.');
+      }
+    } finally {
+      setRegistering(false);
+    }
+  };
+
+  const handleDelete = async (id) => {
+    if (!confirm('Remove this passkey?')) return;
+    await webAuthnAPI.deleteCredential(id);
+    load();
+  };
+
+  if (!isSupported) return null;
+
+  return (
+    <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-5 space-y-3">
+      <h2 className="font-semibold text-gray-800 flex items-center gap-2">
+        <span className="text-lg">🔑</span> Passkeys &amp; Biometrics
+      </h2>
+      <p className="text-sm text-gray-500">Use Face ID, fingerprint, or a device PIN to confirm time correction submissions — no password needed.</p>
+
+      {credentials.length === 0 ? (
+        <p className="text-sm text-gray-400">No passkeys registered yet.</p>
+      ) : (
+        <ul className="space-y-2">
+          {credentials.map((c) => (
+            <li key={c._id} className="flex items-center justify-between bg-gray-50 rounded-lg px-3 py-2">
+              <div>
+                <p className="text-sm font-medium text-gray-800">
+                  {c.deviceType === 'multiDevice' ? 'Synced passkey' : 'Device passkey'}
+                </p>
+                <p className="text-xs text-gray-400">Added {new Date(c.createdAt).toLocaleDateString()}</p>
+              </div>
+              <button onClick={() => handleDelete(c._id)} className="text-xs text-red-500 hover:underline">Remove</button>
+            </li>
+          ))}
+        </ul>
+      )}
+
+      {regError && <p className="text-red-500 text-xs">{regError}</p>}
+      {regSuccess && <p className="text-green-600 text-xs">{regSuccess}</p>}
+
+      <button
+        onClick={handleRegister}
+        disabled={registering}
+        className="flex items-center gap-2 text-sm text-blue-600 hover:text-blue-700 font-medium border border-blue-200 rounded-lg px-3 py-2 hover:bg-blue-50 transition-colors disabled:opacity-50"
+      >
+        {registering ? 'Registering...' : '+ Add Passkey'}
+      </button>
     </div>
   );
 }

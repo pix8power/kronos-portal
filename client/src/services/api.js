@@ -144,4 +144,13 @@ export const profileAPI = {
   getIcalToken: () => api.get('/profile/ical-token'),
 };
 
+export const webAuthnAPI = {
+  getRegisterOptions: () => api.get('/webauthn/register-options'),
+  register: (data) => api.post('/webauthn/register', data),
+  getAuthOptions: () => api.get('/webauthn/auth-options'),
+  verify: (data) => api.post('/webauthn/verify', data),
+  getCredentials: () => api.get('/webauthn/credentials'),
+  deleteCredential: (id) => api.delete(`/webauthn/credentials/${id}`),
+};
+
 export default api;

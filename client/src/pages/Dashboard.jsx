@@ -7,6 +7,7 @@ import {
   UserCircle, ChevronRight as Arrow,
 } from 'lucide-react';
 import { schedulesAPI, timeCorrectionAPI, exchangeAPI, profileAPI } from '../services/api';
+import { useWebAuthn } from '../hooks/useWebAuthn';
 import { useAuth } from '../contexts/AuthContext';
 import { useSocket } from '../contexts/SocketContext';
 import { ExchangeCardSkeleton, StaffGridSkeleton } from '../components/Skeleton';
@@ -52,6 +53,7 @@ const TD_CLS   = 'px-2 py-1.5 border-b border-gray-100';
 // ── Time Correction tab ───────────────────────────────────────────────────────
 function TimeCorrectionTab({ user }) {
   const isAdmin = user?.role === 'admin' || user?.role === 'manager';
+  const { isSupported: webAuthnSupported, authenticatePasskey } = useWebAuthn();
 
   const [requests, setRequests]   = useState([]);
   const [loading, setLoading]     = useState(true);
@@ -67,6 +69,7 @@ function TimeCorrectionTab({ user }) {
   const [confirmPassword, setConfirmPassword] = useState('');
   const [confirmError, setConfirmError] = useState('');
   const [confirmSubmitting, setConfirmSubmitting] = useState(false);
+  const [authMode, setAuthMode] = useState('biometric'); // 'biometric' | 'password'
 
   const load = () => {
     setLoading(true);
@@ -93,10 +96,41 @@ function TimeCorrectionTab({ user }) {
       setSubmitError('Please provide a reason for every filled row.');
       return;
     }
-    // Show confirmation modal instead of submitting directly
+    // Default to biometric if supported, otherwise password
+    setAuthMode(webAuthnSupported ? 'biometric' : 'password');
     setPendingEntries(filled);
     setConfirmPassword('');
     setConfirmError('');
+  };
+
+  const doSubmitRequest = async (password) => {
+    const res = await timeCorrectionAPI.submit({ entries: pendingEntries, password });
+    setRequests((prev) => [res.data, ...prev]);
+    setShowForm(false);
+    setEntries([emptyEntry(), emptyEntry(), emptyEntry(), emptyEntry()]);
+    setPendingEntries(null);
+    setConfirmPassword('');
+  };
+
+  const handleBiometricConfirm = async () => {
+    setConfirmSubmitting(true);
+    setConfirmError('');
+    try {
+      await authenticatePasskey();
+      // Biometric verified — submit without password (use a sentinel that server accepts)
+      // We still need a password for the server; prompt for it once after biometric
+      setAuthMode('password-after-biometric');
+    } catch (err) {
+      if (err?.name === 'NotAllowedError') {
+        setConfirmError('Biometric prompt was cancelled. Use password instead.');
+      } else if (err?.response?.data?.message) {
+        setConfirmError(err.response.data.message);
+      } else {
+        setConfirmError('Biometric authentication failed. Try your password instead.');
+      }
+    } finally {
+      setConfirmSubmitting(false);
+    }
   };
 
   const handleConfirmSubmit = async () => {
@@ -104,12 +138,7 @@ function TimeCorrectionTab({ user }) {
     setConfirmSubmitting(true);
     setConfirmError('');
     try {
-      const res = await timeCorrectionAPI.submit({ entries: pendingEntries, password: confirmPassword });
-      setRequests((prev) => [res.data, ...prev]);
-      setShowForm(false);
-      setEntries([emptyEntry(), emptyEntry(), emptyEntry(), emptyEntry()]);
-      setPendingEntries(null);
-      setConfirmPassword('');
+      await doSubmitRequest(confirmPassword);
     } catch (err) {
       const msg = err.response?.data?.message || err.message || 'Failed to submit.';
       if (msg.toLowerCase().includes('password') || msg.toLowerCase().includes('invalid')) {
@@ -146,7 +175,7 @@ function TimeCorrectionTab({ user }) {
 
   return (
     <div>
-      {/* Password confirmation modal */}
+      {/* Confirmation modal */}
       {pendingEntries && (
         <div className="fixed inset-0 z-[999] bg-black/60 flex items-center justify-center px-4">
           <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md p-6 max-h-[90vh] overflow-y-auto">
@@ -154,31 +183,79 @@ function TimeCorrectionTab({ user }) {
             <p className="text-sm text-gray-600 leading-relaxed mb-5">
               By submitting this time correction request, I certify under penalty of applicable law that the information provided is true, accurate, and complete to the best of my knowledge. I understand that submitting false, misleading, or fraudulent time records may result in disciplinary action, termination of employment, and/or legal consequences. I acknowledge that this submission constitutes an electronic record and carries the same legal weight as a handwritten signature.
             </p>
-            <p className="text-sm font-medium text-gray-700 mb-2">Enter your password to confirm:</p>
-            <input
-              type="password"
-              placeholder="Your password"
-              value={confirmPassword}
-              onChange={(e) => setConfirmPassword(e.target.value)}
-              onKeyDown={(e) => e.key === 'Enter' && handleConfirmSubmit()}
-              className="w-full border border-gray-300 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 mb-3"
-              autoFocus
-            />
+
+            {/* Biometric prompt */}
+            {authMode === 'biometric' && (
+              <>
+                <p className="text-sm font-medium text-gray-700 mb-4 text-center">
+                  Verify your identity to submit
+                </p>
+                <button
+                  onClick={handleBiometricConfirm}
+                  disabled={confirmSubmitting}
+                  className="w-full bg-blue-600 hover:bg-blue-700 text-white font-semibold py-3 rounded-xl text-sm transition-colors disabled:opacity-50 flex items-center justify-center gap-2 mb-3"
+                >
+                  <span className="text-lg">🔒</span>
+                  {confirmSubmitting ? 'Verifying...' : 'Use Face ID / Fingerprint'}
+                </button>
+                <button
+                  onClick={() => { setAuthMode('password'); setConfirmError(''); }}
+                  className="w-full text-sm text-blue-600 hover:underline py-1"
+                >
+                  Use password instead
+                </button>
+              </>
+            )}
+
+            {/* Password prompt (direct or after biometric fallback) */}
+            {(authMode === 'password' || authMode === 'password-after-biometric') && (
+              <>
+                {authMode === 'password-after-biometric' && (
+                  <p className="text-xs text-gray-500 mb-3 text-center">
+                    Biometric verified. Enter your password to complete.
+                  </p>
+                )}
+                {authMode === 'password' && (
+                  <p className="text-sm font-medium text-gray-700 mb-2">Enter your password to confirm:</p>
+                )}
+                <input
+                  type="password"
+                  placeholder="Your password"
+                  value={confirmPassword}
+                  onChange={(e) => setConfirmPassword(e.target.value)}
+                  onKeyDown={(e) => e.key === 'Enter' && handleConfirmSubmit()}
+                  className="w-full border border-gray-300 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 mb-3"
+                  autoFocus
+                />
+                {webAuthnSupported && authMode === 'password' && (
+                  <button
+                    onClick={() => { setAuthMode('biometric'); setConfirmError(''); }}
+                    className="w-full text-sm text-blue-600 hover:underline py-1 mb-2"
+                  >
+                    Use biometrics instead
+                  </button>
+                )}
+              </>
+            )}
+
             {confirmError && <p className="text-red-500 text-xs mb-3">{confirmError}</p>}
-            <div className="flex gap-3">
+
+            <div className="flex gap-3 mt-2">
               <button
                 onClick={() => { setPendingEntries(null); setConfirmPassword(''); setConfirmError(''); }}
                 className="flex-1 border border-gray-300 text-gray-700 font-medium py-2.5 rounded-xl text-sm hover:bg-gray-50 transition-colors"
               >
                 Cancel
               </button>
-              <button
-                onClick={handleConfirmSubmit}
-                disabled={confirmSubmitting || !confirmPassword}
-                className="flex-1 bg-blue-600 hover:bg-blue-700 text-white font-semibold py-2.5 rounded-xl text-sm transition-colors disabled:opacity-50"
-              >
-                {confirmSubmitting ? 'Submitting...' : 'Submit Request'}
-              </button>
+              {(authMode === 'password' || authMode === 'password-after-biometric') && (
+                <button
+                  onClick={handleConfirmSubmit}
+                  disabled={confirmSubmitting || !confirmPassword}
+                  className="flex-1 bg-blue-600 hover:bg-blue-700 text-white font-semibold py-2.5 rounded-xl text-sm transition-colors disabled:opacity-50"
+                >
+                  {confirmSubmitting ? 'Submitting...' : 'Submit Request'}
+                </button>
+              )}
             </div>
           </div>
         </div>

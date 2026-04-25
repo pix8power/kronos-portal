@@ -68,6 +68,7 @@ app.use('/api/open-shifts', require('./routes/openShifts'));
 app.use('/api/recurring-shifts', require('./routes/recurringShifts'));
 app.use('/api/profile', require('./routes/profile'));
 app.use('/api/ical', require('./routes/ical'));
+app.use('/api/webauthn', require('./routes/webauthn'));
 app.use('/uploads', require('express').static(require('path').join(__dirname, '../uploads')));
 
 app.get('/api/health', (req, res) => res.json({ status: 'ok' }));
