@@ -4,7 +4,7 @@ import { format, startOfWeek, endOfWeek, addWeeks, addDays, eachDayOfInterval, p
 import {
   Calendar, Clock, TrendingUp, ChevronRight, Users,
   AlarmClockPlus, Plus, Check, X, Trash2, AlertCircle, ArrowLeftRight,
-  UserCircle, ChevronRight as Arrow,
+  UserCircle, ChevronRight as Arrow, Download,
 } from 'lucide-react';
 import { schedulesAPI, timeCorrectionAPI, exchangeAPI, profileAPI } from '../services/api';
 import { useWebAuthn } from '../hooks/useWebAuthn';
@@ -79,6 +79,23 @@ function TimeCorrectionTab({ user }) {
       .finally(() => setLoading(false));
   };
   useEffect(() => { load(); }, [filterStatus]);
+
+  const handleExport = () => {
+    const token = localStorage.getItem('token');
+    const url = `${import.meta.env.VITE_API_URL || '/api'}/timecorrections/export?weeks=2`;
+    const a = document.createElement('a');
+    a.href = url;
+    a.setAttribute('download', '');
+    // Fetch with auth header and create blob URL
+    fetch(url, { headers: { Authorization: `Bearer ${token}` } })
+      .then((r) => r.blob())
+      .then((blob) => {
+        const blobUrl = URL.createObjectURL(blob);
+        a.href = blobUrl;
+        a.click();
+        URL.revokeObjectURL(blobUrl);
+      });
+  };
 
   const updateEntry = (i, field, val) =>
     setEntries((prev) => prev.map((e, idx) => idx === i ? { ...e, [field]: val } : e));
@@ -274,7 +291,17 @@ function TimeCorrectionTab({ user }) {
             </span>
           )}
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 flex-wrap">
+          {isAdmin && (
+            <button
+              onClick={handleExport}
+              className="flex items-center gap-1.5 border border-gray-300 text-gray-600 hover:bg-gray-50 px-3 py-2 rounded-lg text-sm font-medium transition-colors"
+              title="Export last 2 weeks to CSV"
+            >
+              <Download className="h-4 w-4" />
+              Export CSV
+            </button>
+          )}
           <select
             value={filterStatus}
             onChange={(e) => setFilter(e.target.value)}

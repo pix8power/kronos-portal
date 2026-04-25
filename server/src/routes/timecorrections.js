@@ -2,8 +2,6 @@ const router = require('express').Router();
 const TimeCorrection = require('../models/TimeCorrection');
 const Shift = require('../models/Shift');
 const User = require('../models/User');
-const Conversation = require('../models/Conversation');
-const Message = require('../models/Message');
 const { auth } = require('../middleware/auth');
 const { sendPush } = require('../utils/sendPush');
 
@@ -61,72 +59,21 @@ router.post('/', auth, async (req, res) => {
 
     const populated = await request.populate('employee', 'name email color position');
 
-    // ── Notify managers/admins via direct message ─────────────────────────────
+    // ── Push-notify managers/admins ───────────────────────────────────────────
     try {
-      const io = req.app.get('io');
-      const managers = await User.find({ role: { $in: ['admin', 'manager'] } });
-
-      const pad = (s, n) => String(s).padEnd(n);
-
-      const entryLines = entries
-        .filter((e) => e.date || e.clockIn || e.clockOut)
-        .map((e) =>
-          `${pad(e.date || '—', 11)}| ${pad(to12h(e.clockIn), 9)}| ${pad(to12h(e.lunchOut), 10)}| ${pad(to12h(e.lunchIn), 10)}| ${pad(to12h(e.clockOut), 9)}| ${e.reason || '—'}`
-        )
-        .join('\n');
-
-      const msgContent =
-        `📋 Time Correction Request from ${req.user.name}\n\n` +
-        `${'Date'.padEnd(11)}| ${'In'.padEnd(9)}| ${'Lunch Out'.padEnd(10)}| ${'Lunch In'.padEnd(10)}| ${'Out'.padEnd(9)}| Reason\n` +
-        entryLines;
-
+      const managers = await User.find({ role: { $in: ['admin', 'manager'] } }, '_id');
       for (const manager of managers) {
         if (manager._id.toString() === req.user._id.toString()) continue;
-
-        let conv = await Conversation.findOne({
-          isGroup: false,
-          participants: { $all: [req.user._id, manager._id], $size: 2 },
-        });
-
-        if (!conv) {
-          conv = await Conversation.create({
-            participants: [req.user._id, manager._id],
-            isGroup: false,
-            createdBy: req.user._id,
-          });
-        }
-
-        const msg = await Message.create({
-          conversation: conv._id,
-          sender: req.user._id,
-          content: msgContent,
-          type: 'text',
-          readBy: [req.user._id],
-        });
-
-        await Conversation.findByIdAndUpdate(conv._id, { lastMessage: msg._id });
-        const populatedMsg = await msg.populate('sender', 'name email avatar color');
-
-        if (io) {
-          io.to(manager._id.toString()).emit('messageNotification', {
-            conversationId: conv._id,
-            message: populatedMsg,
-          });
-          io.to(`conv:${conv._id}`).emit('newMessage', {
-            conversationId: conv._id,
-            message: populatedMsg,
-          });
-        }
         sendPush(manager._id.toString(), {
           title: `Time Correction from ${req.user.name}`,
           body: 'A new time correction request was submitted.',
           icon: '/icon-192.png',
           badge: '/icon-192.png',
-          data: { url: '/time-corrections' },
+          data: { url: '/' },
         }).catch(() => {});
       }
     } catch (notifyErr) {
-      console.error('Manager notification error:', notifyErr.message);
+      console.error('Manager push error:', notifyErr.message);
     }
     // ─────────────────────────────────────────────────────────────────────────
 
@@ -209,6 +156,56 @@ router.delete('/:id', auth, async (req, res) => {
     if (!request) return res.status(404).json({ message: 'Request not found or already reviewed' });
     await request.deleteOne();
     res.json({ message: 'Request deleted' });
+  } catch (err) {
+    res.status(500).json({ message: err.message });
+  }
+});
+
+// GET /timecorrections/export — CSV download (admin/manager only)
+router.get('/export', auth, async (req, res) => {
+  try {
+    const { role } = req.user;
+    if (role !== 'admin' && role !== 'manager') {
+      return res.status(403).json({ message: 'Access denied.' });
+    }
+
+    const weeks = parseInt(req.query.weeks, 10) || 2;
+    const since = new Date();
+    since.setDate(since.getDate() - weeks * 7);
+
+    const requests = await TimeCorrection.find({ createdAt: { $gte: since } })
+      .populate('employee', 'name email position department')
+      .populate('reviewedBy', 'name')
+      .sort({ createdAt: -1 });
+
+    const esc = (v) => `"${String(v ?? '').replace(/"/g, '""')}"`;
+    const rows = ['Employee,Email,Position,Department,Date,Clock In,Lunch Out,Lunch In,Clock Out,Entry Reason,Status,Reviewed By,Review Note,Submitted At'];
+
+    for (const r of requests) {
+      for (const e of r.entries) {
+        rows.push([
+          esc(r.employee?.name),
+          esc(r.employee?.email),
+          esc(r.employee?.position),
+          esc(r.employee?.department),
+          esc(e.date),
+          esc(to12h(e.clockIn)),
+          esc(to12h(e.lunchOut)),
+          esc(to12h(e.lunchIn)),
+          esc(to12h(e.clockOut)),
+          esc(e.reason),
+          esc(r.status),
+          esc(r.reviewedBy?.name),
+          esc(r.reviewNote),
+          esc(r.createdAt?.toISOString().slice(0, 10)),
+        ].join(','));
+      }
+    }
+
+    const filename = `time-corrections-${new Date().toISOString().slice(0, 10)}.csv`;
+    res.setHeader('Content-Type', 'text/csv');
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+    res.send(rows.join('\n'));
   } catch (err) {
     res.status(500).json({ message: err.message });
   }

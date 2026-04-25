@@ -18,6 +18,7 @@ const announcementRoutes = require('./routes/announcements');
 const { initSocket } = require('./socket');
 const { startShiftReminderJob } = require('./jobs/shiftReminders');
 const { startExpiryReminderJob } = require('./jobs/expiryReminders');
+const { startTimeCorrectionReminderJob } = require('./jobs/timeCorrectionReminder');
 
 const corsOptions = {
   origin: true,
@@ -107,5 +108,6 @@ mongoose
     console.log('MongoDB connected');
     startShiftReminderJob();
     startExpiryReminderJob();
+    startTimeCorrectionReminderJob();
   })
   .catch((err) => console.error('MongoDB connection error:', err));
