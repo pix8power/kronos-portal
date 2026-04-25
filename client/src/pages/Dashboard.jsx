@@ -83,16 +83,16 @@ function TimeCorrectionTab({ user }) {
   const handleExport = () => {
     const token = localStorage.getItem('token');
     const url = `${import.meta.env.VITE_API_URL || '/api'}/timecorrections/export?weeks=2`;
-    const a = document.createElement('a');
-    a.href = url;
-    a.setAttribute('download', '');
-    // Fetch with auth header and create blob URL
     fetch(url, { headers: { Authorization: `Bearer ${token}` } })
       .then((r) => r.blob())
       .then((blob) => {
         const blobUrl = URL.createObjectURL(blob);
+        const a = document.createElement('a');
         a.href = blobUrl;
+        a.download = `time-corrections-${new Date().toISOString().slice(0, 10)}.csv`;
+        document.body.appendChild(a);
         a.click();
+        document.body.removeChild(a);
         URL.revokeObjectURL(blobUrl);
       });
   };
