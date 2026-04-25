@@ -2,8 +2,11 @@ const router = require('express').Router();
 const TimeCorrection = require('../models/TimeCorrection');
 const Shift = require('../models/Shift');
 const User = require('../models/User');
+const Conversation = require('../models/Conversation');
+const Message = require('../models/Message');
 const { auth } = require('../middleware/auth');
 const { sendPush } = require('../utils/sendPush');
+const { sendTimeCorrectionDecision } = require('../utils/email');
 
 // Convert HH:MM (24h) → h:MM AM/PM
 const to12h = (t) => {
@@ -139,6 +142,78 @@ router.patch('/:id', auth, async (req, res) => {
         }
       }
     }
+
+    // ── Notify employee via email + in-app message ────────────────────────────
+    try {
+      const io = req.app.get('io');
+      const approved = status === 'approved';
+      const label = approved ? 'Approved ✅' : 'Denied ❌';
+
+      // Email
+      sendTimeCorrectionDecision({
+        toEmail: request.employee.email,
+        toName: request.employee.name,
+        status,
+        reviewNote: reviewNote || '',
+        reviewerName: req.user.name,
+        entries: request.entries,
+      }).catch((err) => console.error('Email error:', err.message));
+
+      // Push notification
+      sendPush(request.employee._id.toString(), {
+        title: `Time Correction ${label}`,
+        body: reviewNote
+          ? `${req.user.name}: "${reviewNote}"`
+          : `Your time correction was ${status} by ${req.user.name}.`,
+        icon: '/icon-192.png',
+        badge: '/icon-192.png',
+        data: { url: '/' },
+      }).catch(() => {});
+
+      // In-app direct message from reviewer to employee
+      let conv = await Conversation.findOne({
+        isGroup: false,
+        participants: { $all: [req.user._id, request.employee._id], $size: 2 },
+      });
+      if (!conv) {
+        conv = await Conversation.create({
+          participants: [req.user._id, request.employee._id],
+          isGroup: false,
+          createdBy: req.user._id,
+        });
+      }
+
+      const msgLines = [`📋 Time Correction ${label}`, ''];
+      for (const e of request.entries) {
+        if (!e.date) continue;
+        msgLines.push(`${e.date}  In: ${to12h(e.clockIn)}  Out: ${to12h(e.clockOut)}  — ${e.reason || 'no reason'}`);
+      }
+      if (reviewNote) msgLines.push(`\nNote: ${reviewNote}`);
+
+      const msg = await Message.create({
+        conversation: conv._id,
+        sender: req.user._id,
+        content: msgLines.join('\n'),
+        type: 'text',
+        readBy: [req.user._id],
+      });
+      await Conversation.findByIdAndUpdate(conv._id, { lastMessage: msg._id });
+      const populatedMsg = await msg.populate('sender', 'name email avatar color');
+
+      if (io) {
+        io.to(request.employee._id.toString()).emit('messageNotification', {
+          conversationId: conv._id,
+          message: populatedMsg,
+        });
+        io.to(`conv:${conv._id}`).emit('newMessage', {
+          conversationId: conv._id,
+          message: populatedMsg,
+        });
+      }
+    } catch (notifyErr) {
+      console.error('Notify employee error:', notifyErr.message);
+    }
+    // ─────────────────────────────────────────────────────────────────────────
 
     res.json(request);
   } catch (err) {
