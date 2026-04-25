@@ -18,8 +18,9 @@ const to12h = (t) => {
 router.get('/', auth, async (req, res) => {
   try {
     const query = req.user.role === 'employee' ? { employee: req.user._id } : {};
-    const { status } = req.query;
+    const { status, since } = req.query;
     if (status) query.status = status;
+    if (since) query.createdAt = { $gte: new Date(since) };
 
     const requests = await TimeCorrection.find(query)
       .populate('employee', 'name email color position')

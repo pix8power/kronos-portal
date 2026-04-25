@@ -81,8 +81,32 @@ function TimeCorrectionTab({ user }) {
   useEffect(() => { load(); }, [filterStatus]);
 
   const [exportWeeks, setExportWeeks] = useState('2');
-
   const [exporting, setExporting] = useState(false);
+  const [showReport, setShowReport] = useState(false);
+  const [reportWeeks, setReportWeeks] = useState('2');
+  const [reportData, setReportData] = useState([]);
+  const [reportLoading, setReportLoading] = useState(false);
+
+  const loadReport = async (weeks) => {
+    setReportLoading(true);
+    try {
+      const params = weeks === 'all' ? {} : (() => {
+        const since = new Date();
+        since.setDate(since.getDate() - Number(weeks) * 7);
+        return { since: since.toISOString() };
+      })();
+      const res = await timeCorrectionAPI.getAll(params);
+      setReportData(res.data);
+    } catch { /* ignore */ }
+    finally { setReportLoading(false); }
+  };
+
+  const handleShowReport = () => {
+    setShowReport((v) => {
+      if (!v) loadReport(reportWeeks);
+      return !v;
+    });
+  };
 
   const handleExport = async () => {
     setExporting(true);
@@ -329,8 +353,8 @@ function TimeCorrectionTab({ user }) {
           {isAdmin && (
             <div className="flex items-center gap-1">
               <select
-                value={exportWeeks}
-                onChange={(e) => setExportWeeks(e.target.value)}
+                value={reportWeeks}
+                onChange={(e) => { setReportWeeks(e.target.value); if (showReport) loadReport(e.target.value); }}
                 className="px-2 py-2 text-sm border border-gray-300 rounded-l-lg focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white"
               >
                 <option value="2">Last 2 wks</option>
@@ -339,12 +363,19 @@ function TimeCorrectionTab({ user }) {
                 <option value="all">All time</option>
               </select>
               <button
+                onClick={handleShowReport}
+                className={`flex items-center gap-1.5 border border-l-0 px-3 py-2 text-sm font-medium transition-colors ${showReport ? 'bg-blue-600 text-white border-blue-600' : 'border-gray-300 text-gray-600 hover:bg-gray-50'}`}
+              >
+                {showReport ? 'Hide Report' : 'View Report'}
+              </button>
+              <button
                 onClick={handleExport}
                 disabled={exporting}
                 className="flex items-center gap-1.5 border border-l-0 border-gray-300 text-gray-600 hover:bg-gray-50 px-3 py-2 rounded-r-lg text-sm font-medium transition-colors disabled:opacity-50"
+                title="Export to CSV"
               >
                 <Download className="h-4 w-4" />
-                {exporting ? 'Exporting…' : 'Export'}
+                {exporting ? '…' : 'CSV'}
               </button>
             </div>
           )}
@@ -367,6 +398,87 @@ function TimeCorrectionTab({ user }) {
           </button>
         </div>
       </div>
+
+      {/* ── Inline report table (admin) ─────────────────────────────────────── */}
+      {isAdmin && showReport && (
+        <div className="bg-white rounded-xl border border-gray-200 shadow-sm mb-6 overflow-hidden">
+          <div className="px-4 py-3 border-b border-gray-100 flex items-center justify-between">
+            <h3 className="font-semibold text-gray-800 text-sm">
+              Time Correction Report
+              {!reportLoading && (
+                <span className="ml-2 text-xs font-normal text-gray-400">
+                  {reportData.reduce((n, r) => n + r.entries.length, 0)} entries · {reportData.length} requests
+                </span>
+              )}
+            </h3>
+            {/* Summary badges */}
+            {!reportLoading && (
+              <div className="flex gap-2">
+                {['pending','approved','denied'].map((s) => {
+                  const count = reportData.filter((r) => r.status === s).length;
+                  const cls = s === 'pending' ? 'bg-yellow-100 text-yellow-700' : s === 'approved' ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-600';
+                  return count > 0 ? (
+                    <span key={s} className={`text-xs font-semibold px-2 py-0.5 rounded-full capitalize ${cls}`}>{count} {s}</span>
+                  ) : null;
+                })}
+              </div>
+            )}
+          </div>
+
+          {reportLoading ? (
+            <div className="py-10 text-center text-sm text-gray-400">Loading…</div>
+          ) : reportData.length === 0 ? (
+            <div className="py-10 text-center text-sm text-gray-400">No corrections found for this period.</div>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full text-xs">
+                <thead>
+                  <tr className="bg-gray-50 text-gray-500 uppercase tracking-wide text-[10px]">
+                    <th className="px-3 py-2 text-left font-semibold">Employee</th>
+                    <th className="px-3 py-2 text-left font-semibold">Date</th>
+                    <th className="px-3 py-2 text-left font-semibold">In</th>
+                    <th className="px-3 py-2 text-left font-semibold">Lunch Out</th>
+                    <th className="px-3 py-2 text-left font-semibold">Lunch In</th>
+                    <th className="px-3 py-2 text-left font-semibold">Out</th>
+                    <th className="px-3 py-2 text-left font-semibold">Reason</th>
+                    <th className="px-3 py-2 text-left font-semibold">Status</th>
+                    <th className="px-3 py-2 text-left font-semibold">Reviewed By</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-100">
+                  {reportData.map((r) =>
+                    r.entries.map((e, i) => (
+                      <tr key={`${r._id}-${i}`} className="hover:bg-gray-50">
+                        <td className="px-3 py-2 whitespace-nowrap">
+                          <div className="flex items-center gap-2">
+                            <div className="w-5 h-5 rounded-full flex items-center justify-center text-white text-[9px] font-bold flex-shrink-0"
+                              style={{ backgroundColor: r.employee?.color || '#3B82F6' }}>
+                              {r.employee?.name?.split(' ').map((n) => n[0]).join('').slice(0, 2)}
+                            </div>
+                            <span className="font-medium text-gray-800">{r.employee?.name}</span>
+                          </div>
+                        </td>
+                        <td className="px-3 py-2 whitespace-nowrap text-gray-700">{e.date || '—'}</td>
+                        <td className="px-3 py-2 whitespace-nowrap text-gray-700">{to12h(e.clockIn)}</td>
+                        <td className="px-3 py-2 whitespace-nowrap text-gray-500">{to12h(e.lunchOut)}</td>
+                        <td className="px-3 py-2 whitespace-nowrap text-gray-500">{to12h(e.lunchIn)}</td>
+                        <td className="px-3 py-2 whitespace-nowrap text-gray-700">{to12h(e.clockOut)}</td>
+                        <td className="px-3 py-2 text-gray-600 max-w-[160px] truncate">{e.reason || '—'}</td>
+                        <td className="px-3 py-2 whitespace-nowrap">
+                          <span className={`px-2 py-0.5 rounded-full font-semibold capitalize ${STATUS_BADGE[r.status] || 'bg-gray-100 text-gray-600'}`}>
+                            {r.status}
+                          </span>
+                        </td>
+                        <td className="px-3 py-2 whitespace-nowrap text-gray-500">{r.reviewedBy?.name || '—'}</td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      )}
 
       {/* ── Submission form ─────────────────────────────────────────────────── */}
       {showForm && (
