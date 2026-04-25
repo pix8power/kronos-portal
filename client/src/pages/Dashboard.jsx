@@ -86,7 +86,7 @@ function TimeCorrectionTab({ user }) {
     const token = localStorage.getItem('token');
     const weeks = exportWeeks === 'all' ? 0 : exportWeeks;
     const base = import.meta.env.VITE_API_URL || '/api';
-    window.location.href = `${base}/timecorrections/export?weeks=${weeks}&_token=${token}`;
+    window.location.href = `${base}/timecorrections/export?weeks=${weeks}&_token=${encodeURIComponent(token)}`;
   };
 
   const updateEntry = (i, field, val) =>
