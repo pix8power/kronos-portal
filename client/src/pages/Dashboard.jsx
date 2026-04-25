@@ -82,33 +82,11 @@ function TimeCorrectionTab({ user }) {
 
   const [exportWeeks, setExportWeeks] = useState('2');
 
-  const handleExport = async () => {
+  const handleExport = () => {
     const token = localStorage.getItem('token');
     const weeks = exportWeeks === 'all' ? 0 : exportWeeks;
-    const url = `${import.meta.env.VITE_API_URL || '/api'}/timecorrections/export?weeks=${weeks}`;
-    try {
-      const r = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
-      if (!r.ok) {
-        const err = await r.json().catch(() => ({ message: 'Export failed' }));
-        alert(err.message || 'Export failed');
-        return;
-      }
-      const blob = await r.blob();
-      if (blob.size < 10) { alert('No time correction data found for this period.'); return; }
-      const filename = `time-corrections-${new Date().toISOString().slice(0, 10)}.csv`;
-      const reader = new FileReader();
-      reader.onload = () => {
-        const a = document.createElement('a');
-        a.href = reader.result;
-        a.download = filename;
-        document.body.appendChild(a);
-        a.click();
-        document.body.removeChild(a);
-      };
-      reader.readAsDataURL(blob);
-    } catch (err) {
-      alert('Export failed: ' + err.message);
-    }
+    const base = import.meta.env.VITE_API_URL || '/api';
+    window.open(`${base}/timecorrections/export?weeks=${weeks}&_token=${token}`, '_blank');
   };
 
   const updateEntry = (i, field, val) =>
