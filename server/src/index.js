@@ -32,6 +32,9 @@ const io = new Server(server, {
   maxHttpBufferSize: 5e6, // 5MB — needed for image messages
 });
 
+// Trust Railway's reverse proxy so rate limiting uses real client IPs
+app.set('trust proxy', 1);
+
 // Middleware
 app.use(cors(corsOptions));
 app.use(express.json());
@@ -103,7 +106,7 @@ const PORT = process.env.PORT || 5000;
 server.listen(PORT, '0.0.0.0', () => console.log(`Server running on port ${PORT}`));
 
 mongoose
-  .connect(process.env.MONGODB_URI)
+  .connect(process.env.MONGODB_URI, { maxPoolSize: 20, serverSelectionTimeoutMS: 5000 })
   .then(() => {
     console.log('MongoDB connected');
     startShiftReminderJob();

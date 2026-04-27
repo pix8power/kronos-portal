@@ -1,9 +1,10 @@
 import { useState, useEffect } from 'react';
-import { Megaphone, Pin, Trash2, Plus, X, ChevronDown } from 'lucide-react';
+import { Megaphone, Pin, Trash2, Plus, X } from 'lucide-react';
 import { announcementsAPI } from '../services/api';
 import { useAuth } from '../contexts/AuthContext';
 import { useToast } from '../contexts/ToastContext';
 import { formatDistanceToNow } from 'date-fns';
+import { DEPARTMENTS } from '../constants/departments';
 
 const PRIVILEGED = ['admin', 'manager', 'charge_nurse'];
 const ALL_ROLES = ['admin', 'manager', 'charge_nurse', 'employee'];
@@ -13,7 +14,7 @@ export default function Announcements() {
   const [announcements, setAnnouncements] = useState([]);
   const [loading, setLoading] = useState(true);
   const [showForm, setShowForm] = useState(false);
-  const [form, setForm] = useState({ title: '', body: '', targetRoles: [], pinned: false });
+  const [form, setForm] = useState({ title: '', body: '', targetRoles: [], targetDepartments: [], pinned: false });
   const [saving, setSaving] = useState(false);
 
   const isPrivileged = PRIVILEGED.includes(user?.role);
@@ -32,7 +33,7 @@ export default function Announcements() {
     try {
       const res = await announcementsAPI.create(form);
       setAnnouncements((prev) => [res.data, ...prev]);
-      setForm({ title: '', body: '', targetRoles: [], pinned: false });
+      setForm({ title: '', body: '', targetRoles: [], targetDepartments: [], pinned: false });
       setShowForm(false);
       toastSuccess('Announcement posted');
     } catch {
@@ -67,6 +68,13 @@ export default function Announcements() {
     }));
   };
 
+  const toggleDept = (dept) => {
+    setForm((f) => ({
+      ...f,
+      targetDepartments: f.targetDepartments.includes(dept) ? f.targetDepartments.filter((d) => d !== dept) : [...f.targetDepartments, dept],
+    }));
+  };
+
   return (
     <div className="p-4 md:p-6 max-w-2xl mx-auto space-y-4">
       <div className="flex items-center justify-between">
@@ -89,12 +97,23 @@ export default function Announcements() {
           <textarea rows={3} value={form.body} onChange={(e) => setForm({ ...form, body: e.target.value })}
             placeholder="Message *" className="w-full px-3 py-2.5 text-sm border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none" />
           <div>
-            <p className="text-xs font-medium text-gray-500 dark:text-gray-400 mb-1.5">Send to (leave empty for all):</p>
+            <p className="text-xs font-medium text-gray-500 dark:text-gray-400 mb-1.5">Roles (leave empty for all):</p>
             <div className="flex flex-wrap gap-2">
               {ALL_ROLES.map((role) => (
                 <button key={role} onClick={() => toggleRole(role)}
                   className={`px-2.5 py-1 rounded-full text-xs font-medium border transition-colors ${form.targetRoles.includes(role) ? 'bg-blue-600 text-white border-blue-600' : 'border-gray-200 dark:border-gray-600 text-gray-600 dark:text-gray-400 hover:border-blue-400'}`}>
                   {role.replace('_', ' ')}
+                </button>
+              ))}
+            </div>
+          </div>
+          <div>
+            <p className="text-xs font-medium text-gray-500 dark:text-gray-400 mb-1.5">Departments (leave empty for all):</p>
+            <div className="flex flex-wrap gap-2">
+              {DEPARTMENTS.map((dept) => (
+                <button key={dept} onClick={() => toggleDept(dept)}
+                  className={`px-2.5 py-1 rounded-full text-xs font-medium border transition-colors ${form.targetDepartments.includes(dept) ? 'bg-indigo-600 text-white border-indigo-600' : 'border-gray-200 dark:border-gray-600 text-gray-600 dark:text-gray-400 hover:border-indigo-400'}`}>
+                  {dept}
                 </button>
               ))}
             </div>
@@ -147,7 +166,16 @@ export default function Announcements() {
             <span>{ann.createdBy?.name}</span>
             <span>·</span>
             <span>{formatDistanceToNow(new Date(ann.createdAt), { addSuffix: true })}</span>
-            {ann.targetRoles?.length > 0 && <span className="ml-auto">→ {ann.targetRoles.map((r) => r.replace('_', ' ')).join(', ')}</span>}
+            {(ann.targetRoles?.length > 0 || ann.targetDepartments?.length > 0) && (
+              <span className="ml-auto flex flex-wrap gap-1 justify-end">
+                {ann.targetRoles?.map((r) => (
+                  <span key={r} className="bg-blue-50 text-blue-600 px-1.5 py-0.5 rounded text-[10px] font-medium">{r.replace('_', ' ')}</span>
+                ))}
+                {ann.targetDepartments?.map((d) => (
+                  <span key={d} className="bg-indigo-50 text-indigo-600 px-1.5 py-0.5 rounded text-[10px] font-medium">{d}</span>
+                ))}
+              </span>
+            )}
           </div>
         </div>
       ))}

@@ -281,28 +281,17 @@ function DailyView({ date, shifts, employees, approvedTimeOff, pendingTimeOff, a
   const totalW     = STAFF_COL + (DAY_END - DAY_START) * HW;
   const hours      = Array.from({ length: DAY_END - DAY_START }, (_, i) => DAY_START + i);
 
+  // employees is already sorted by the parent; preserve that order
   const displayedEmps = filterEmployee ? employees.filter((e) => e._id === filterEmployee) : employees;
-  const MANAGER_ROLES = ['admin', 'manager'];
-  const MANAGER_POS   = ['Manager'];
 
-  const positionGroups = [...displayedEmps]
-    .sort((a, b) => {
-      const aM = MANAGER_ROLES.includes(a.role), bM = MANAGER_ROLES.includes(b.role);
-      if (aM !== bM) return aM ? -1 : 1;
-      return a.name.localeCompare(b.name);
-    })
-    .reduce((acc, emp) => {
-      const pos = emp.position || 'Unassigned';
-      if (!acc[pos]) acc[pos] = [];
-      acc[pos].push(emp);
-      return acc;
-    }, {});
-
-  const sortedPositions = Object.keys(positionGroups).sort((a, b) => {
-    const aM = MANAGER_POS.includes(a), bM = MANAGER_POS.includes(b);
-    if (aM !== bM) return aM ? -1 : 1;
-    return a.localeCompare(b);
-  });
+  const positionGroups = {};
+  const positionOrder = [];
+  for (const emp of displayedEmps) {
+    const pos = emp.position || 'Unassigned';
+    if (!positionGroups[pos]) { positionGroups[pos] = []; positionOrder.push(pos); }
+    positionGroups[pos].push(emp);
+  }
+  const sortedPositions = positionOrder;
 
   const getDayShifts = (empId) =>
     shifts.filter((s) => (s.employee?._id || s.employee) === empId && s.date === dateStr);
@@ -486,34 +475,21 @@ function DailyView({ date, shifts, employees, approvedTimeOff, pendingTimeOff, a
 }
 
 // ── Staff-row month grid (monthly / 2-month views) ────────────────────────────
-const MANAGER_POSITIONS_GRID = ['Manager'];
-const MANAGER_ROLES_GRID = ['admin', 'manager'];
 
 function StaffMonthGrid({ days, shifts, employees, approvedTimeOff, pendingTimeOff, availability, holidays, filterEmployee, isAdmin, canReview, user, onAddShift, onEditShift, onReviewTimeOff, onMessage, onToggleAvailability, monthLabels, zoom = 1 }) {
   const holidayMap = Object.fromEntries((holidays || []).map((h) => [h.date, h.name]));
 
+  // employees is already sorted by the parent; preserve that order
   const displayedEmps = filterEmployee ? employees.filter((e) => e._id === filterEmployee) : employees;
 
-  const positionGroups = [...displayedEmps]
-    .sort((a, b) => {
-      const aM = MANAGER_ROLES_GRID.includes(a.role);
-      const bM = MANAGER_ROLES_GRID.includes(b.role);
-      if (aM !== bM) return aM ? -1 : 1;
-      return a.name.localeCompare(b.name);
-    })
-    .reduce((acc, emp) => {
-      const pos = emp.position || 'Unassigned';
-      if (!acc[pos]) acc[pos] = [];
-      acc[pos].push(emp);
-      return acc;
-    }, {});
-
-  const sortedPositions = Object.keys(positionGroups).sort((a, b) => {
-    const aM = MANAGER_POSITIONS_GRID.includes(a);
-    const bM = MANAGER_POSITIONS_GRID.includes(b);
-    if (aM !== bM) return aM ? -1 : 1;
-    return a.localeCompare(b);
-  });
+  const positionGroups = {};
+  const positionOrder = [];
+  for (const emp of displayedEmps) {
+    const pos = emp.position || 'Unassigned';
+    if (!positionGroups[pos]) { positionGroups[pos] = []; positionOrder.push(pos); }
+    positionGroups[pos].push(emp);
+  }
+  const sortedPositions = positionOrder;
 
   const getShiftsForCell = (empId, day) => {
     const d = format(day, 'yyyy-MM-dd');
@@ -961,36 +937,54 @@ export default function Schedule() {
     );
   };
 
-  const displayedEmployees = filterEmployee
-    ? employees.filter((e) => e._id === filterEmployee)
-    : employees;
+  // Role → display order
+  const ROLE_RANK = { admin: 0, manager: 1, charge_nurse: 2, employee: 3 };
+  // Position → display order (within the employee role)
+  const POSITION_RANK = { 'RN': 0, 'LVN': 1, 'Medical Assistant': 2 };
 
-  // Group displayed employees by position
-  // Manager position and manager-role users always sort to the top
-  const MANAGER_POSITIONS = ['Manager'];
-  const MANAGER_ROLES = ['admin', 'manager'];
+  // Earliest shift start (minutes since midnight) per employee across the current view
+  const empMinShift = {};
+  for (const s of filteredShifts) {
+    const id = s.employee?._id || s.employee;
+    if (!id || !s.startTime) continue;
+    const [h, m] = s.startTime.split(':').map(Number);
+    const mins = h * 60 + m;
+    if (empMinShift[id] === undefined || mins < empMinShift[id]) empMinShift[id] = mins;
+  }
 
-  const positionGroups = [...displayedEmployees]
-    .sort((a, b) => {
-      // Manager role always before non-manager within the same position group
-      const aIsManager = MANAGER_ROLES.includes(a.role);
-      const bIsManager = MANAGER_ROLES.includes(b.role);
-      if (aIsManager !== bIsManager) return aIsManager ? -1 : 1;
-      return a.name.localeCompare(b.name);
-    })
-    .reduce((acc, emp) => {
-      const pos = emp.position || 'Unassigned';
-      if (!acc[pos]) acc[pos] = [];
-      acc[pos].push(emp);
-      return acc;
-    }, {});
-
-  const sortedPositions = Object.keys(positionGroups).sort((a, b) => {
-    const aIsManager = MANAGER_POSITIONS.includes(a);
-    const bIsManager = MANAGER_POSITIONS.includes(b);
-    if (aIsManager !== bIsManager) return aIsManager ? -1 : 1;
-    return a.localeCompare(b);
+  const sortedEmployees = [...employees].sort((a, b) => {
+    const rA = ROLE_RANK[a.role] ?? 4;
+    const rB = ROLE_RANK[b.role] ?? 4;
+    if (rA !== rB) return rA - rB;
+    // Within employee role: position rank
+    if (a.role === 'employee' && b.role === 'employee') {
+      const pA = POSITION_RANK[a.position] ?? 10;
+      const pB = POSITION_RANK[b.position] ?? 10;
+      if (pA !== pB) return pA - pB;
+    }
+    // Earliest shift start time
+    const sA = empMinShift[a._id] ?? 9999;
+    const sB = empMinShift[b._id] ?? 9999;
+    if (sA !== sB) return sA - sB;
+    // Seniority (earliest = most senior = first)
+    const senA = a.seniorityDate ? new Date(a.seniorityDate).getTime() : Infinity;
+    const senB = b.seniorityDate ? new Date(b.seniorityDate).getTime() : Infinity;
+    return senA - senB;
   });
+
+  const displayedEmployees = filterEmployee
+    ? sortedEmployees.filter((e) => e._id === filterEmployee)
+    : sortedEmployees;
+
+  // Build position groups preserving the sorted order
+  const positionGroups = {};
+  const positionOrder = [];
+  for (const emp of displayedEmployees) {
+    const pos = emp.position || 'Unassigned';
+    if (!positionGroups[pos]) { positionGroups[pos] = []; positionOrder.push(pos); }
+    positionGroups[pos].push(emp);
+  }
+  const sortedPositions = positionOrder;
 
   // Get approved time off record for an employee on a given day (if any)
   const getTimeOff = (empId, day) => {
@@ -1351,7 +1345,7 @@ export default function Schedule() {
             <DailyView
               date={currentDate}
               shifts={filteredShifts}
-              employees={employees}
+              employees={sortedEmployees}
               approvedTimeOff={approvedTimeOff}
               pendingTimeOff={pendingTimeOff}
               availability={availability}
@@ -1577,7 +1571,7 @@ export default function Schedule() {
               <StaffMonthGrid
                 days={twDays}
                 shifts={filteredShifts}
-                employees={employees}
+                employees={sortedEmployees}
                 approvedTimeOff={approvedTimeOff}
                 pendingTimeOff={pendingTimeOff}
                 availability={availability}
@@ -1605,7 +1599,7 @@ export default function Schedule() {
               <StaffMonthGrid
                 days={mDays}
                 shifts={filteredShifts}
-                employees={employees}
+                employees={sortedEmployees}
                 approvedTimeOff={approvedTimeOff}
                 pendingTimeOff={pendingTimeOff}
                 availability={availability}
@@ -1633,7 +1627,7 @@ export default function Schedule() {
               <StaffMonthGrid
                 days={mDays}
                 shifts={filteredShifts}
-                employees={employees}
+                employees={sortedEmployees}
                 approvedTimeOff={approvedTimeOff}
                 pendingTimeOff={pendingTimeOff}
                 availability={availability}

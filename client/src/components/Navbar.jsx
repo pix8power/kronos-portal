@@ -35,7 +35,7 @@ const baseNavItems = [
 export default function Navbar() {
   const { user, logout } = useAuth();
   const { activeDepartment, setActiveDepartment } = useAuth();
-  const { unreadMessages, clearUnreadMessages, unreadNotifications, clearUnreadNotifications } = useSocket();
+  const { unreadMessages, clearUnreadMessages, unreadNotifications, clearUnreadNotifications, pendingCorrections } = useSocket();
 
   const location = useLocation();
   const navigate = useNavigate();
@@ -113,6 +113,11 @@ export default function Navbar() {
                 {to === '/' && unreadNotifications > 0 && (
                   <span className="absolute -top-0.5 -right-0.5 min-w-[16px] h-4 bg-red-500 text-white text-[9px] font-bold rounded-full flex items-center justify-center px-1 leading-none">
                     {unreadNotifications > 9 ? '9+' : unreadNotifications}
+                  </span>
+                )}
+                {to === '/' && pendingCorrections > 0 && ['admin', 'manager'].includes(user?.role) && (
+                  <span className="absolute -bottom-0.5 -right-0.5 min-w-[16px] h-4 bg-amber-500 text-white text-[9px] font-bold rounded-full flex items-center justify-center px-1 leading-none">
+                    {pendingCorrections > 9 ? '9+' : pendingCorrections}
                   </span>
                 )}
               </Link>
@@ -245,6 +250,11 @@ export default function Navbar() {
               {to === '/' && unreadNotifications > 0 && (
                 <span className="ml-auto min-w-[18px] h-[18px] bg-red-500 text-white text-[9px] font-bold rounded-full flex items-center justify-center px-1 leading-none">
                   {unreadNotifications > 9 ? '9+' : unreadNotifications}
+                </span>
+              )}
+              {to === '/' && pendingCorrections > 0 && ['admin', 'manager'].includes(user?.role) && (
+                <span className={`min-w-[18px] h-[18px] bg-amber-500 text-white text-[9px] font-bold rounded-full flex items-center justify-center px-1 leading-none ${unreadNotifications > 0 ? 'ml-1' : 'ml-auto'}`}>
+                  {pendingCorrections > 9 ? '9+' : pendingCorrections}
                 </span>
               )}
             </Link>

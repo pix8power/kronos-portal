@@ -75,6 +75,7 @@ export const AuthProvider = ({ children }) => {
     localStorage.removeItem(ACTIVE_DEPT_KEY);
     setUser(null);
     setActiveDepartmentState(null);
+    setMustChangePassword(false);
   };
 
   const updateUser = (data) => {

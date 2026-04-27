@@ -87,6 +87,7 @@ router.post('/login', async (req, res) => {
     user.loginAttempts = 0;
     user.lockUntil = undefined;
     user.isOnline = true;
+    user.lastLogin = new Date();
     await user.save();
 
     const token = signToken(user._id);

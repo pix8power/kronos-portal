@@ -3,20 +3,21 @@ import { Link } from 'react-router-dom';
 import { format, startOfWeek, endOfWeek, addWeeks, addDays, eachDayOfInterval, parseISO, differenceInCalendarDays } from 'date-fns';
 import {
   Calendar, Clock, TrendingUp, ChevronRight, Users,
-  AlarmClockPlus, Plus, Check, X, Trash2, AlertCircle, ArrowLeftRight,
-  UserCircle, ChevronRight as Arrow, Download, Printer, Share2,
+  AlarmClockPlus, Plus, Check, X, Trash2, AlertCircle, AlertTriangle, ArrowLeftRight,
+  UserCircle, ChevronRight as Arrow, Download, Printer, Share2, CalendarCheck,
 } from 'lucide-react';
-import { schedulesAPI, timeCorrectionAPI, exchangeAPI, profileAPI } from '../services/api';
+import { schedulesAPI, timeCorrectionAPI, exchangeAPI, profileAPI, openShiftsAPI } from '../services/api';
 import { useWebAuthn } from '../hooks/useWebAuthn';
 import { useAuth } from '../contexts/AuthContext';
 import { useSocket } from '../contexts/SocketContext';
 import { ExchangeCardSkeleton, StaffGridSkeleton } from '../components/Skeleton';
 
 const ALL_TABS = [
-  { key: 'overview',       label: 'Overview',         privileged: true },
-  { key: 'shiftexchange',  label: 'Shift Exchange',   privileged: false },
-  { key: 'timeoff',        label: 'Time Off',         privileged: false },
-  { key: 'timecorrection', label: 'Time Correction',  privileged: false },
+  { key: 'overview',       label: 'Overview',         privileged: true,  employeeOnly: false },
+  { key: 'staffhours',     label: 'Staff Hours',      privileged: true,  employeeOnly: false },
+  { key: 'shiftexchange',  label: 'Shift Exchange',   privileged: false, employeeOnly: false },
+  { key: 'timeoff',        label: 'Time Off',         privileged: false, employeeOnly: false },
+  { key: 'timecorrection', label: 'Time Correction',  privileged: false, employeeOnly: false },
 ];
 const PRIVILEGED_ROLES = ['admin', 'manager', 'charge_nurse'];
 
@@ -53,6 +54,7 @@ const TD_CLS   = 'px-2 py-1.5 border-b border-gray-100';
 // ── Time Correction tab ───────────────────────────────────────────────────────
 function TimeCorrectionTab({ user }) {
   const isAdmin = user?.role === 'admin' || user?.role === 'manager';
+  const { refreshPendingCorrections } = useSocket();
 
   const [requests, setRequests]   = useState([]);
   const [loading, setLoading]     = useState(true);
@@ -282,6 +284,7 @@ function TimeCorrectionTab({ user }) {
       const res = await timeCorrectionAPI.review(id, { status, reviewNote: reviewNotes[id] || '' });
       setRequests((prev) => prev.map((r) => (r._id === id ? res.data : r)));
       setReviewNotes((prev) => { const n = { ...prev }; delete n[id]; return n; });
+      refreshPendingCorrections();
     } catch (err) {
       setReviewError(err.response?.data?.message || err.message || 'Failed to update request');
     } finally {
@@ -1661,6 +1664,374 @@ function ShiftExchangeTab({ user }) {
   );
 }
 
+// ── Open Shifts tab ───────────────────────────────────────────────────────────
+function OpenShiftTab({ user }) {
+  const isPrivileged = PRIVILEGED_ROLES.includes(user?.role);
+  const [shifts, setShifts] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [awarding, setAwarding] = useState(null); // shiftId being awarded
+  const [otWarning, setOtWarning] = useState(null); // { shiftId, employeeId, data }
+  const [error, setError] = useState('');
+
+  const load = () => {
+    setLoading(true);
+    openShiftsAPI.getAll({ status: 'open' })
+      .then((res) => setShifts(res.data || []))
+      .catch(() => {})
+      .finally(() => setLoading(false));
+  };
+
+  useEffect(() => { load(); }, []);
+
+  const handleAward = async (shiftId, employeeId, force = false) => {
+    setAwarding(shiftId + employeeId);
+    setError('');
+    try {
+      await openShiftsAPI.approve(shiftId, employeeId, force);
+      setShifts((prev) => prev.filter((s) => s._id !== shiftId));
+      setOtWarning(null);
+    } catch (err) {
+      if (err.response?.data?.code === 'OVERTIME_WARNING') {
+        setOtWarning({ shiftId, employeeId, data: err.response.data });
+      } else {
+        setError(err.response?.data?.message || 'Failed to award shift');
+      }
+    } finally {
+      setAwarding(null);
+    }
+  };
+
+  const handleClaim = async (shiftId) => {
+    try {
+      const res = await openShiftsAPI.claim(shiftId);
+      setShifts((prev) => prev.map((s) => s._id === shiftId ? res.data : s));
+    } catch (err) {
+      setError(err.response?.data?.message || 'Failed to claim shift');
+    }
+  };
+
+  const handleCancel = async (shiftId) => {
+    if (!confirm('Cancel this open shift?')) return;
+    await openShiftsAPI.cancel(shiftId);
+    setShifts((prev) => prev.filter((s) => s._id !== shiftId));
+  };
+
+  const initials = (name) => name?.split(' ').map((n) => n[0]).join('').slice(0, 2).toUpperCase();
+
+  const seniorityLabel = (date) => {
+    if (!date) return null;
+    const yrs = Math.floor((Date.now() - new Date(date).getTime()) / (365.25 * 24 * 3600 * 1000));
+    return yrs >= 1 ? `${yrs}yr` : '<1yr';
+  };
+
+  return (
+    <div className="space-y-4">
+      {/* Overtime confirmation modal */}
+      {otWarning && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-4">
+          <div className="bg-white rounded-2xl shadow-xl p-6 max-w-sm w-full">
+            <div className="flex items-center gap-3 mb-3">
+              <div className="bg-amber-100 p-2 rounded-lg">
+                <AlertTriangle className="h-5 w-5 text-amber-600" />
+              </div>
+              <h3 className="font-semibold text-gray-900">Overtime Warning</h3>
+            </div>
+            <p className="text-sm text-gray-600 mb-1">{otWarning.data.message}</p>
+            <p className="text-xs text-gray-400 mb-5">
+              Current week: <strong>{otWarning.data.currentHours.toFixed(1)} hrs</strong> + this shift: <strong>{otWarning.data.newHours.toFixed(1)} hrs</strong> = <strong className="text-amber-600">{otWarning.data.totalHours.toFixed(1)} hrs</strong>
+            </p>
+            <div className="flex gap-2">
+              <button
+                onClick={() => setOtWarning(null)}
+                className="flex-1 px-4 py-2 text-sm border border-gray-300 rounded-lg hover:bg-gray-50"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={() => handleAward(otWarning.shiftId, otWarning.employeeId, true)}
+                className="flex-1 px-4 py-2 text-sm bg-amber-500 hover:bg-amber-600 text-white rounded-lg font-medium"
+              >
+                Award Anyway
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {error && (
+        <div className="bg-red-50 text-red-700 text-sm px-4 py-2 rounded-lg">{error}</div>
+      )}
+
+      {loading ? (
+        <div className="space-y-3">
+          {[1, 2].map((i) => (
+            <div key={i} className="bg-white rounded-xl border border-gray-100 p-4 animate-pulse">
+              <div className="h-4 w-32 bg-gray-200 rounded mb-3" />
+              <div className="h-3 w-48 bg-gray-100 rounded" />
+            </div>
+          ))}
+        </div>
+      ) : shifts.length === 0 ? (
+        <div className="text-center py-12 text-gray-400 bg-white rounded-xl border border-gray-100">
+          <CalendarCheck className="h-10 w-10 mx-auto mb-2 opacity-20" />
+          <p className="text-sm font-medium">No open shifts right now</p>
+        </div>
+      ) : (
+        <div className="space-y-4">
+          {shifts.map((shift) => {
+            const alreadyClaimed = shift.claims?.some(
+              (c) => (c.employee?._id || c.employee) === user._id
+            );
+            // Sort claims: most senior first (earliest seniorityDate), then fallback to claimedAt
+            const sortedClaims = [...(shift.claims || [])].sort((a, b) => {
+              const sA = a.employee?.seniorityDate ? new Date(a.employee.seniorityDate) : new Date('9999-01-01');
+              const sB = b.employee?.seniorityDate ? new Date(b.employee.seniorityDate) : new Date('9999-01-01');
+              return sA - sB;
+            });
+
+            return (
+              <div key={shift._id} className="bg-white rounded-xl border border-gray-100 shadow-sm overflow-hidden">
+                {/* Shift header */}
+                <div className="flex items-center justify-between px-4 py-3 border-b border-gray-50 bg-gray-50/50">
+                  <div>
+                    <p className="font-semibold text-gray-900 text-sm">
+                      {format(parseISO(shift.date + 'T00:00:00'), 'EEE, MMM d')}
+                      <span className="mx-1.5 text-gray-300">·</span>
+                      <span className="text-blue-600">{to12h(shift.startTime)}–{to12h(shift.endTime)}</span>
+                    </p>
+                    <p className="text-xs text-gray-400 mt-0.5">
+                      {shift.position && <span className="mr-2">{shift.position}</span>}
+                      {shift.department && <span>{shift.department}</span>}
+                      {shift.notes && <span className="ml-2 italic">· {shift.notes}</span>}
+                    </p>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs bg-blue-50 text-blue-600 px-2 py-0.5 rounded-full font-medium">
+                      {sortedClaims.length} claim{sortedClaims.length !== 1 ? 's' : ''}
+                    </span>
+                    {isPrivileged && (
+                      <button
+                        onClick={() => handleCancel(shift._id)}
+                        className="text-gray-400 hover:text-red-500 p-1 rounded transition-colors"
+                        title="Cancel shift"
+                      >
+                        <X className="h-4 w-4" />
+                      </button>
+                    )}
+                  </div>
+                </div>
+
+                {/* Claims list */}
+                {sortedClaims.length === 0 ? (
+                  <div className="px-4 py-3 text-sm text-gray-400 italic">No claims yet</div>
+                ) : (
+                  <div className="divide-y divide-gray-50">
+                    {sortedClaims.map((claim, idx) => {
+                      const emp = claim.employee;
+                      const empId = emp?._id || emp;
+                      const isBusy = awarding === shift._id + empId;
+                      return (
+                        <div key={empId} className="flex items-center gap-3 px-4 py-3">
+                          {/* Seniority rank */}
+                          <span className="text-xs font-bold text-gray-300 w-4 shrink-0">#{idx + 1}</span>
+
+                          {/* Avatar */}
+                          <div
+                            className="w-8 h-8 rounded-full flex items-center justify-center text-white text-xs font-bold shrink-0"
+                            style={{ backgroundColor: emp?.color || '#3B82F6' }}
+                          >
+                            {initials(emp?.name)}
+                          </div>
+
+                          {/* Name + seniority */}
+                          <div className="flex-1 min-w-0">
+                            <p className="text-sm font-medium text-gray-900 truncate">{emp?.name}</p>
+                            <div className="flex items-center gap-2 flex-wrap">
+                              {emp?.position && (
+                                <span className="text-xs text-gray-400">{emp.position}</span>
+                              )}
+                              {emp?.seniorityDate && (
+                                <span className="text-xs bg-indigo-50 text-indigo-600 px-1.5 py-0.5 rounded font-medium">
+                                  {seniorityLabel(emp.seniorityDate)} seniority
+                                </span>
+                              )}
+                            </div>
+                          </div>
+
+                          {/* Award button (privileged only) */}
+                          {isPrivileged && (
+                            <button
+                              onClick={() => handleAward(shift._id, empId)}
+                              disabled={isBusy}
+                              className="shrink-0 px-3 py-1.5 text-xs font-semibold bg-green-600 hover:bg-green-700 disabled:bg-green-400 text-white rounded-lg transition-colors"
+                            >
+                              {isBusy ? '…' : 'Award'}
+                            </button>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+
+                {/* Employee: claim button */}
+                {!isPrivileged && (
+                  <div className="px-4 py-3 border-t border-gray-50">
+                    {alreadyClaimed ? (
+                      <span className="text-xs text-green-600 font-medium">✓ You've claimed this shift</span>
+                    ) : (
+                      <button
+                        onClick={() => handleClaim(shift._id)}
+                        className="px-4 py-1.5 text-xs font-semibold bg-blue-600 hover:bg-blue-700 text-white rounded-lg"
+                      >
+                        Claim Shift
+                      </button>
+                    )}
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── Staff Hours tab (admin / manager only) ────────────────────────────────────
+function StaffHoursTab() {
+  const [weekOffset, setWeekOffset] = useState(0);
+  const [rows, setRows] = useState([]);
+  const [loading, setLoading] = useState(true);
+
+  // ISO week Mon–Sun
+  const baseMonday = (() => {
+    const d = new Date();
+    const day = d.getDay();
+    const diff = (day + 6) % 7;
+    d.setDate(d.getDate() - diff);
+    d.setHours(0, 0, 0, 0);
+    return d;
+  })();
+  const weekStart = new Date(baseMonday);
+  weekStart.setDate(baseMonday.getDate() + weekOffset * 7);
+  const weekEnd = new Date(weekStart);
+  weekEnd.setDate(weekStart.getDate() + 6);
+  const fmt = (d) => d.toISOString().slice(0, 10);
+
+  useEffect(() => {
+    setLoading(true);
+    schedulesAPI.getShifts({ startDate: fmt(weekStart), endDate: fmt(weekEnd) })
+      .then((res) => {
+        const map = {};
+        for (const s of res.data || []) {
+          const emp = s.employee;
+          if (!emp) continue;
+          const id = emp._id;
+          if (!map[id]) map[id] = { id, name: emp.name, color: emp.color, position: emp.position, hours: 0 };
+          let h = 0;
+          if (s.startTime && s.endTime) {
+            const [sh, sm] = s.startTime.split(':').map(Number);
+            const [eh, em] = s.endTime.split(':').map(Number);
+            h = (eh + em / 60) - (sh + sm / 60);
+            if (h < 0) h += 24;
+          }
+          map[id].hours += h;
+        }
+        setRows(Object.values(map).sort((a, b) => b.hours - a.hours));
+      })
+      .finally(() => setLoading(false));
+  }, [weekOffset]);
+
+  const weekLabel = `${weekStart.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })} – ${weekEnd.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}`;
+  const otCount = rows.filter((r) => r.hours > 40).length;
+
+  return (
+    <div className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
+      <div className="flex items-center justify-between px-5 py-4 border-b border-gray-100">
+        <div className="flex items-center gap-3">
+          <div className="bg-blue-500 p-2 rounded-lg">
+            <TrendingUp className="h-4 w-4 text-white" />
+          </div>
+          <div>
+            <p className="font-semibold text-gray-900">Staff Hours</p>
+            <p className="text-xs text-gray-400">{weekLabel}</p>
+          </div>
+          {otCount > 0 && (
+            <span className="bg-red-100 text-red-700 text-xs font-semibold px-2.5 py-1 rounded-full">
+              {otCount} over 40h
+            </span>
+          )}
+        </div>
+        <div className="flex items-center gap-1">
+          <button onClick={() => setWeekOffset((n) => n - 1)} className="p-2 rounded-lg hover:bg-gray-100 text-gray-500">
+            <ChevronRight className="h-4 w-4 rotate-180" />
+          </button>
+          {weekOffset !== 0 && (
+            <button onClick={() => setWeekOffset(0)} className="text-xs px-2 py-1 rounded-lg bg-blue-50 text-blue-600 font-medium">
+              This Week
+            </button>
+          )}
+          <button onClick={() => setWeekOffset((n) => n + 1)} className="p-2 rounded-lg hover:bg-gray-100 text-gray-500">
+            <ChevronRight className="h-4 w-4" />
+          </button>
+        </div>
+      </div>
+
+      {loading ? (
+        <div className="p-4 space-y-3">
+          {[1, 2, 3, 4, 5].map((i) => (
+            <div key={i} className="flex items-center gap-3 animate-pulse">
+              <div className="w-8 h-8 rounded-full bg-gray-200" />
+              <div className="flex-1 h-3 bg-gray-200 rounded" />
+              <div className="w-14 h-5 bg-gray-200 rounded" />
+            </div>
+          ))}
+        </div>
+      ) : rows.length === 0 ? (
+        <p className="text-sm text-gray-400 text-center py-10">No shifts scheduled this week</p>
+      ) : (
+        <div className="divide-y divide-gray-50">
+          {rows.map((r) => {
+            const isOT = r.hours > 40;
+            const pct = Math.min((r.hours / 40) * 100, 100);
+            return (
+              <div key={r.id} className={`flex items-center gap-3 px-5 py-3 ${isOT ? 'bg-red-50/50' : ''}`}>
+                <div
+                  className="w-8 h-8 rounded-full flex items-center justify-center text-white text-xs font-bold flex-shrink-0"
+                  style={{ backgroundColor: r.color || '#3B82F6' }}
+                >
+                  {r.name.split(' ').map((n) => n[0]).join('').slice(0, 2)}
+                </div>
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2 mb-1">
+                    <span className="text-sm font-medium text-gray-900 truncate">{r.name}</span>
+                    {r.position && <span className="text-xs text-gray-400 truncate">{r.position}</span>}
+                  </div>
+                  <div className="h-1.5 bg-gray-100 rounded-full overflow-hidden">
+                    <div
+                      className={`h-full rounded-full transition-all ${isOT ? 'bg-red-500' : pct >= 80 ? 'bg-amber-400' : 'bg-blue-400'}`}
+                      style={{ width: `${pct}%` }}
+                    />
+                  </div>
+                </div>
+                <div className="text-right flex-shrink-0">
+                  <span className={`text-sm font-bold ${isOT ? 'text-red-600' : 'text-gray-800'}`}>
+                    {r.hours.toFixed(1)}h
+                  </span>
+                  {isOT && (
+                    <p className="text-[10px] text-red-500 font-medium">OT +{(r.hours - 40).toFixed(1)}h</p>
+                  )}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ── Overview tab (admin / manager / charge RN only) ───────────────────────────
 function OverviewTab({ user }) {
   const [weekOffset, setWeekOffset] = useState(0); // 0 = current week, 1 = next, etc.
@@ -1819,11 +2190,15 @@ function expiryLabel(days) {
 // ── Dashboard page ────────────────────────────────────────────────────────────
 export default function Dashboard() {
   const { user } = useAuth();
-  const { socket } = useSocket();
+  const { socket, clearPendingCorrections, refreshPendingCorrections } = useSocket();
   const [expiryItems, setExpiryItems] = useState([]);
 
   const isPrivileged = PRIVILEGED_ROLES.includes(user?.role);
-  const tabs = ALL_TABS.filter((t) => !t.privileged || isPrivileged);
+  const tabs = ALL_TABS.filter((t) => {
+    if (t.privileged && !isPrivileged) return false;
+    if (t.employeeOnly && isPrivileged) return false;
+    return true;
+  });
 
   const [activeTab, setActiveTab] = useState(() => isPrivileged ? 'overview' : 'shiftexchange');
   const [pendingCorrections, setPendingCorrections] = useState(0);
@@ -1875,7 +2250,11 @@ export default function Dashboard() {
   // Clear exchange badge when user opens the tab
   useEffect(() => {
     if (activeTab === 'shiftexchange') setPendingExchanges(0);
-  }, [activeTab]);
+    if (activeTab === 'timecorrection') {
+      setPendingCorrections(0);
+      clearPendingCorrections();
+    }
+  }, [activeTab, clearPendingCorrections]);
 
   if (loading) {
     return (
@@ -1978,6 +2357,8 @@ export default function Dashboard() {
       {/* Tab content — key forces remount + fade-in on tab change */}
       <div key={activeTab} className="animate-fade-in">
         {activeTab === 'overview' && <OverviewTab user={user} />}
+        {activeTab === 'staffhours' && <StaffHoursTab />}
+        {activeTab === 'openshift' && <OpenShiftTab user={user} />}
         {activeTab === 'shiftexchange' && <ShiftExchangeTab user={user} />}
         {activeTab === 'timeoff' && <TimeOffTab user={user} />}
         {activeTab === 'timecorrection' && <TimeCorrectionTab user={user} />}

@@ -101,4 +101,29 @@ async function sendTimeCorrectionDecision({ toEmail, toName, status, reviewNote,
   });
 }
 
-module.exports = { sendPasswordReset, sendContactForm, sendTimeCorrectionDecision };
+async function sendShiftExchangeDecision({ toEmail, toName, status, date, managerNote, managerName, coveredByName }) {
+  const transporter = createTransport();
+  const approved = status === 'approved';
+  const color = approved ? '#16a34a' : '#dc2626';
+  const label = approved ? 'Approved' : 'Not Approved';
+
+  await transporter.sendMail({
+    from: `"KronosPortal" <${process.env.SMTP_USER}>`,
+    to: toEmail,
+    subject: `Shift Swap ${label} — KronosPortal`,
+    html: `
+      <div style="font-family:sans-serif;max-width:480px;margin:auto;padding:24px">
+        <h2 style="color:${color};margin-bottom:4px">Shift Swap ${label}</h2>
+        <p>Hi ${toName},</p>
+        ${approved
+          ? `<p>Your shift swap request for <strong>${date}</strong> has been <strong style="color:${color}">approved</strong> by ${managerName}${coveredByName ? `. ${coveredByName} will cover your shift` : ''}.</p>`
+          : `<p>Your proposed shift swap for <strong>${date}</strong> was <strong style="color:${color}">not approved</strong> by ${managerName}. You may choose another colleague.</p>`
+        }
+        ${managerNote ? `<p style="background:#f3f4f6;padding:12px;border-radius:8px;font-size:14px"><strong>Note:</strong> ${managerNote}</p>` : ''}
+        <p style="color:#6b7280;font-size:13px">Log in to KronosPortal to view your schedule.</p>
+      </div>
+    `,
+  });
+}
+
+module.exports = { sendPasswordReset, sendContactForm, sendTimeCorrectionDecision, sendShiftExchangeDecision };

@@ -5,7 +5,7 @@ import { useAuth } from '../contexts/AuthContext';
 import { useSocket } from '../contexts/SocketContext';
 import { useNavigate } from 'react-router-dom';
 import { messagesAPI } from '../services/api';
-import { Users, Search, MessageCircle, Mail, Phone, Shield, Trash2, X } from 'lucide-react';
+import { Users, Search, MessageCircle, Mail, Phone, Shield, Trash2, X, CalendarDays, Clock } from 'lucide-react';
 import { DEPARTMENTS } from '../constants/departments';
 
 const ROLE_COLORS = {
@@ -27,7 +27,9 @@ export default function Employees() {
   const [loading, setLoading] = useState(true);
   const [roleError, setRoleError] = useState('');
   const [confirmDelete, setConfirmDelete] = useState(null);
+  const [tooltipId, setTooltipId] = useState(null);
   const canSeePhone = ['admin', 'manager', 'charge_nurse'].includes(user?.role);
+
 
   useEffect(() => {
     usersAPI.getAll()
@@ -149,6 +151,7 @@ export default function Employees() {
             <div
               key={emp._id}
               className="bg-white rounded-xl border border-gray-100 shadow-sm p-5 hover:shadow-md transition-shadow"
+              onClick={() => setTooltipId(null)}
             >
               <div className="flex items-start gap-3">
                 <div className="relative">
@@ -171,13 +174,21 @@ export default function Employees() {
                   )}
                 </div>
                 <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-2">
-                    <p className="font-semibold text-gray-900 truncate">
-                      {emp.name} {isMe && <span className="text-xs text-gray-400">(you)</span>}
+                  <div className="relative group">
+                    <p
+                      className="font-semibold text-gray-900 truncate cursor-default select-none"
+                      onClick={(e) => { e.stopPropagation(); setTooltipId(tooltipId === emp._id ? null : emp._id); }}
+                    >
+                      {emp.name} {isMe && <span className="text-xs font-normal text-gray-400">(you)</span>}
                     </p>
+                    {/* Tooltip — CSS hover on desktop, tap-toggle on mobile */}
+                    <div className={`absolute left-0 bottom-full mb-1.5 z-20 bg-gray-900 text-white text-xs px-2.5 py-1.5 rounded-lg whitespace-nowrap shadow-xl pointer-events-none transition-opacity duration-150 ${tooltipId === emp._id ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'}`}>
+                      {emp.name}
+                      <div className="absolute top-full left-3 border-4 border-transparent border-t-gray-900" />
+                    </div>
                   </div>
                   <span className={`inline-block text-xs px-2 py-0.5 rounded-full font-medium mt-0.5 ${ROLE_COLORS[emp.role]}`}>
-                    {emp.role}
+                    {emp.role.replace('_', ' ')}
                   </span>
                 </div>
               </div>
@@ -193,10 +204,25 @@ export default function Employees() {
                   <Mail className="h-3.5 w-3.5 text-gray-400" />
                   <span className="truncate">{emp.email}</span>
                 </div>
+                {emp.seniorityDate && (
+                  <div className="flex items-center gap-2 text-sm text-gray-600">
+                    <CalendarDays className="h-3.5 w-3.5 text-gray-400 shrink-0" />
+                    <span>Seniority: {new Date(emp.seniorityDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}</span>
+                    <span className="text-xs text-indigo-500 font-medium bg-indigo-50 px-1.5 py-0.5 rounded-full">
+                      {Math.floor((Date.now() - new Date(emp.seniorityDate).getTime()) / (365.25 * 24 * 3600 * 1e3))}yr
+                    </span>
+                  </div>
+                )}
                 {emp.phone && canSeePhone && (
                   <div className="flex items-center gap-2 text-sm text-gray-600">
                     <Phone className="h-3.5 w-3.5 text-gray-400" />
                     <span>{emp.phone}</span>
+                  </div>
+                )}
+                {emp.lastLogin && isAdmin && (
+                  <div className="flex items-center gap-2 text-sm text-gray-500">
+                    <Clock className="h-3.5 w-3.5 text-gray-400 shrink-0" />
+                    <span>Last login: {new Date(emp.lastLogin).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}</span>
                   </div>
                 )}
               </div>

@@ -63,8 +63,9 @@ router.post('/', auth, async (req, res) => {
 
     const populated = await request.populate('employee', 'name email color position');
 
-    // ── Push-notify managers/admins ───────────────────────────────────────────
+    // ── Push-notify + socket-notify managers/admins ──────────────────────────
     try {
+      const io = req.app.get('io');
       const managers = await User.find({ role: { $in: ['admin', 'manager'] } }, '_id');
       for (const manager of managers) {
         if (manager._id.toString() === req.user._id.toString()) continue;
@@ -75,6 +76,7 @@ router.post('/', auth, async (req, res) => {
           badge: '/icon-192.png',
           data: { url: '/' },
         }).catch(() => {});
+        if (io) io.to(manager._id.toString()).emit('timeCorrectionPending');
       }
     } catch (notifyErr) {
       console.error('Manager push error:', notifyErr.message);

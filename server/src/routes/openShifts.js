@@ -7,7 +7,31 @@ const { sendPush } = require('../utils/sendPush');
 
 const PRIVILEGED = ['admin', 'manager', 'charge_nurse'];
 
-// GET open shifts
+// HH:MM → decimal hours
+function toHours(t) {
+  if (!t) return 0;
+  const [h, m] = t.split(':').map(Number);
+  return h + m / 60;
+}
+
+function shiftHours(start, end) {
+  let h = toHours(end) - toHours(start);
+  if (h < 0) h += 24; // overnight
+  return h;
+}
+
+// ISO week bounds (Mon–Sun) for a YYYY-MM-DD string
+function weekBounds(dateStr) {
+  const d = new Date(dateStr + 'T00:00:00');
+  const day = d.getDay(); // 0=Sun
+  const diffToMon = (day + 6) % 7;
+  const mon = new Date(d); mon.setDate(d.getDate() - diffToMon);
+  const sun = new Date(mon); sun.setDate(mon.getDate() + 6);
+  const fmt = (x) => x.toISOString().slice(0, 10);
+  return { weekStart: fmt(mon), weekEnd: fmt(sun) };
+}
+
+// GET open shifts — populate seniorityDate on claimants
 router.get('/', auth, async (req, res) => {
   try {
     const { status = 'open', startDate, endDate } = req.query;
@@ -15,8 +39,8 @@ router.get('/', auth, async (req, res) => {
     if (startDate && endDate) query.date = { $gte: startDate, $lte: endDate };
     const shifts = await OpenShift.find(query)
       .populate('createdBy', 'name')
-      .populate('claims.employee', 'name color position')
-      .populate('approvedEmployee', 'name')
+      .populate('claims.employee', 'name color position seniorityDate')
+      .populate('approvedEmployee', 'name color')
       .sort({ date: 1, startTime: 1 });
     res.json(shifts);
   } catch (err) {
@@ -32,8 +56,15 @@ router.post('/', auth, async (req, res) => {
     const shift = await OpenShift.create({ date, startTime, endTime, position, department, notes, createdBy: req.user._id });
     await shift.populate('createdBy', 'name');
 
-    // Notify all employees
-    const users = await User.find({ role: 'employee' }, '_id');
+    // Target employees matching position and/or department; fall back to all employees
+    const empFilter = { role: 'employee' };
+    if (position) empFilter.position = position;
+    if (department) empFilter.department = department;
+    let users = await User.find(empFilter, '_id');
+    // If no match with filters, notify all employees
+    if (users.length === 0) {
+      users = await User.find({ role: 'employee' }, '_id');
+    }
     for (const u of users) {
       sendPush(u._id.toString(), {
         title: '📋 Open Shift Available',
@@ -58,9 +89,8 @@ router.post('/:id/claim', auth, async (req, res) => {
 
     shift.claims.push({ employee: req.user._id });
     await shift.save();
-    await shift.populate('claims.employee', 'name color position');
+    await shift.populate('claims.employee', 'name color position seniorityDate');
 
-    // Notify creator
     sendPush(shift.createdBy.toString(), {
       title: 'Shift Claimed',
       body: `${req.user.name} claimed the open shift on ${shift.date}.`,
@@ -73,15 +103,39 @@ router.post('/:id/claim', auth, async (req, res) => {
   }
 });
 
-// PATCH approve a claim → creates real shift
+// PATCH approve a claim → creates real shift, with overtime check
 router.patch('/:id/approve', auth, async (req, res) => {
   if (!PRIVILEGED.includes(req.user.role)) return res.status(403).json({ message: 'Forbidden' });
   try {
-    const { employeeId } = req.body;
+    const { employeeId, force } = req.body;
     const openShift = await OpenShift.findById(req.params.id);
     if (!openShift || openShift.status !== 'open') return res.status(400).json({ message: 'Shift not available' });
 
-    // Create actual shift
+    // ── Overtime check ────────────────────────────────────────────────────────
+    const { weekStart, weekEnd } = weekBounds(openShift.date);
+    const weekShifts = await Shift.find({
+      employee: employeeId,
+      date: { $gte: weekStart, $lte: weekEnd },
+      status: { $ne: 'cancelled' },
+    });
+    const currentHours = weekShifts.reduce((sum, s) => sum + shiftHours(s.startTime, s.endTime), 0);
+    const newHours = shiftHours(openShift.startTime, openShift.endTime);
+    const totalHours = currentHours + newHours;
+    const OT_THRESHOLD = 40;
+    const willBeOvertime = totalHours > OT_THRESHOLD;
+
+    if (willBeOvertime && !force) {
+      return res.status(409).json({
+        code: 'OVERTIME_WARNING',
+        message: `Awarding this shift will bring ${totalHours.toFixed(1)} hrs this week (overtime threshold: ${OT_THRESHOLD} hrs).`,
+        currentHours: parseFloat(currentHours.toFixed(2)),
+        newHours: parseFloat(newHours.toFixed(2)),
+        totalHours: parseFloat(totalHours.toFixed(2)),
+        threshold: OT_THRESHOLD,
+      });
+    }
+    // ─────────────────────────────────────────────────────────────────────────
+
     const realShift = await Shift.create({
       employee: employeeId,
       date: openShift.date,
@@ -97,14 +151,13 @@ router.patch('/:id/approve', auth, async (req, res) => {
     openShift.status = 'filled';
     await openShift.save();
 
-    // Notify approved employee
     sendPush(employeeId.toString(), {
       title: 'Open Shift Approved!',
       body: `You've been approved for the shift on ${openShift.date} (${openShift.startTime}–${openShift.endTime}).`,
       data: { url: '/schedule' },
     }).catch(() => {});
 
-    res.json({ openShift, realShift });
+    res.json({ openShift, realShift, overtimeAwarded: willBeOvertime, totalHours: parseFloat(totalHours.toFixed(2)) });
   } catch (err) {
     res.status(500).json({ message: err.message });
   }

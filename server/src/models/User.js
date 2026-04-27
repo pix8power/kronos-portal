@@ -20,6 +20,7 @@ const userSchema = new mongoose.Schema(
     resetPasswordToken: { type: String },
     resetPasswordExpires: { type: Date },
     mustChangePassword: { type: Boolean, default: false },
+    lastLogin:     { type: Date },
     // Profile extras
     hireDate:      { type: String, default: '' },
     seniorityDate: { type: String, default: '' },

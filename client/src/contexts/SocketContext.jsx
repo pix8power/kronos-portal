@@ -12,6 +12,9 @@ export const SocketProvider = ({ children }) => {
   const [onlineUsers, setOnlineUsers] = useState(new Set());
   const [unreadMessages, setUnreadMessages] = useState(0);
   const [unreadNotifications, setUnreadNotifications] = useState(0);
+  const [pendingCorrections, setPendingCorrections] = useState(0);
+
+  const isReviewer = user?.role === 'admin' || user?.role === 'manager';
 
   useEffect(() => {
     if (!user) {
@@ -30,10 +33,14 @@ export const SocketProvider = ({ children }) => {
 
     s.on('connect', () => {
       setSocket(s);
-      // Sync badge with actual DB unread count on every (re)connect
       api.get('/messages/unread-count')
         .then(({ data }) => setUnreadMessages(data.count || 0))
         .catch(() => {});
+      if (isReviewer) {
+        api.get('/timecorrections?status=pending')
+          .then(({ data }) => setPendingCorrections(data.length || 0))
+          .catch(() => {});
+      }
     });
 
     s.on('userOnline', ({ userId }) => {
@@ -56,6 +63,10 @@ export const SocketProvider = ({ children }) => {
       setUnreadNotifications((n) => n + 1);
     });
 
+    s.on('timeCorrectionPending', () => {
+      if (isReviewer) setPendingCorrections((n) => n + 1);
+    });
+
     return () => {
       s.disconnect();
       socketRef.current = null;
@@ -67,9 +78,15 @@ export const SocketProvider = ({ children }) => {
   const incrementUnreadMessages = useCallback(() => setUnreadMessages((n) => n + 1), []);
   const clearUnreadMessages = useCallback(() => setUnreadMessages(0), []);
   const clearUnreadNotifications = useCallback(() => setUnreadNotifications(0), []);
+  const clearPendingCorrections = useCallback(() => setPendingCorrections(0), []);
+  const refreshPendingCorrections = useCallback(() => {
+    api.get('/timecorrections?status=pending')
+      .then(({ data }) => setPendingCorrections(data.length || 0))
+      .catch(() => {});
+  }, []);
 
   return (
-    <SocketContext.Provider value={{ socket, getSocket, onlineUsers, unreadMessages, incrementUnreadMessages, clearUnreadMessages, unreadNotifications, setUnreadNotifications, clearUnreadNotifications }}>
+    <SocketContext.Provider value={{ socket, getSocket, onlineUsers, unreadMessages, incrementUnreadMessages, clearUnreadMessages, unreadNotifications, setUnreadNotifications, clearUnreadNotifications, pendingCorrections, clearPendingCorrections, refreshPendingCorrections }}>
       {children}
     </SocketContext.Provider>
   );

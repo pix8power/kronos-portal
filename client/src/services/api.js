@@ -125,7 +125,7 @@ export const openShiftsAPI = {
   getAll: (params) => api.get('/open-shifts', { params }),
   create: (data) => api.post('/open-shifts', data),
   claim: (id) => api.post(`/open-shifts/${id}/claim`),
-  approve: (id, employeeId) => api.patch(`/open-shifts/${id}/approve`, { employeeId }),
+  approve: (id, employeeId, force = false) => api.patch(`/open-shifts/${id}/approve`, { employeeId, force }),
   cancel: (id) => api.delete(`/open-shifts/${id}`),
 };
 

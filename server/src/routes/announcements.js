@@ -9,9 +9,10 @@ const PRIVILEGED = ['admin', 'manager', 'charge_nurse'];
 // GET all announcements visible to this user
 router.get('/', auth, async (req, res) => {
   try {
-    const announcements = await Announcement.find({
-      $or: [{ targetRoles: { $size: 0 } }, { targetRoles: req.user.role }],
-    })
+    const { role, department } = req.user;
+    const roleMatch = { $or: [{ targetRoles: { $size: 0 } }, { targetRoles: role }] };
+    const deptMatch = { $or: [{ targetDepartments: { $size: 0 } }, { targetDepartments: department }] };
+    const announcements = await Announcement.find({ $and: [roleMatch, deptMatch] })
       .populate('createdBy', 'name color')
       .sort({ pinned: -1, createdAt: -1 })
       .limit(50);
@@ -25,21 +26,23 @@ router.get('/', auth, async (req, res) => {
 router.post('/', auth, async (req, res) => {
   if (!PRIVILEGED.includes(req.user.role)) return res.status(403).json({ message: 'Forbidden' });
   try {
-    const { title, body, targetRoles = [], pinned = false } = req.body;
+    const { title, body, targetRoles = [], targetDepartments = [], pinned = false } = req.body;
     if (!title || !body) return res.status(400).json({ message: 'Title and body required' });
 
-    const ann = await Announcement.create({ title, body, createdBy: req.user._id, targetRoles, pinned });
+    const ann = await Announcement.create({ title, body, createdBy: req.user._id, targetRoles, targetDepartments, pinned });
     await ann.populate('createdBy', 'name color');
 
-    // Push to targeted users
-    const roleFilter = targetRoles.length > 0 ? { role: { $in: targetRoles } } : {};
-    const users = await User.find(roleFilter, '_id');
+    // Push to targeted users (filter by role and department)
+    const userFilter = {};
+    if (targetRoles.length > 0) userFilter.role = { $in: targetRoles };
+    if (targetDepartments.length > 0) userFilter.department = { $in: targetDepartments };
+    const users = await User.find(userFilter, '_id');
     for (const u of users) {
       if (u._id.toString() === req.user._id.toString()) continue;
       sendPush(u._id.toString(), {
         title: `📢 ${title}`,
         body,
-        data: { url: '/' },
+        data: { url: '/announcements' },
       }).catch(() => {});
     }
 

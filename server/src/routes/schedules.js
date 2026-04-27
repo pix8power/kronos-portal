@@ -8,6 +8,7 @@ const { auth, isAdmin } = require('../middleware/auth');
 const { audit } = require('../utils/audit');
 const { notify } = require('../utils/notify');
 const { sendPush } = require('../utils/sendPush');
+const { sendShiftExchangeDecision } = require('../utils/email');
 const User = require('../models/User');
 
 // Helper: check for shift conflicts for an employee on a date
@@ -516,6 +517,18 @@ router.patch('/exchanges/:id', auth, isAdmin, async (req, res) => {
           : `Your proposed shift swap for ${exchange.date} was not approved. You may choose another colleague.`,
         link: '/',
       });
+      // Email the requester about the denial
+      const requester = await User.findById(exchange.requestedBy, 'name email');
+      if (requester) {
+        sendShiftExchangeDecision({
+          toEmail: requester.email,
+          toName: requester.name,
+          status: 'denied',
+          date: exchange.date,
+          managerNote: managerNote || '',
+          managerName: req.user.name,
+        }).catch((e) => console.error('Exchange denial email error:', e.message));
+      }
       const populated = await ShiftExchange.findById(exchange._id).populate([...EXCHANGE_POPULATE, { path: 'proposedAcceptedBy', select: 'name color' }]);
       return res.json(populated);
     }
@@ -542,6 +555,23 @@ router.patch('/exchanges/:id', auth, isAdmin, async (req, res) => {
       body: `You've been approved to cover a shift on ${exchange.date}.`,
       link: '/schedule',
     });
+
+    // Email both parties about the approval
+    const [requesterUser, covererUser] = await Promise.all([
+      User.findById(exchange.requestedBy, 'name email'),
+      User.findById(acceptedBy, 'name email'),
+    ]);
+    if (requesterUser) {
+      sendShiftExchangeDecision({
+        toEmail: requesterUser.email,
+        toName: requesterUser.name,
+        status: 'approved',
+        date: exchange.date,
+        managerNote: managerNote || '',
+        managerName: req.user.name,
+        coveredByName: covererUser?.name,
+      }).catch((e) => console.error('Exchange approval email error:', e.message));
+    }
 
     const populated = await ShiftExchange.findById(exchange._id).populate([...EXCHANGE_POPULATE, { path: 'proposedAcceptedBy', select: 'name color' }]);
     res.json(populated);

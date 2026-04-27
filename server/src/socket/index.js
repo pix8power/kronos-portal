@@ -29,7 +29,7 @@ const initSocket = (io) => {
 
     // Update user online status
     await User.findByIdAndUpdate(userId, { isOnline: true });
-    io.emit('userOnline', { userId });
+    socket.broadcast.emit('userOnline', { userId });
 
     console.log(`User connected: ${socket.user.name} (${socket.id})`);
 
@@ -144,7 +144,7 @@ const initSocket = (io) => {
         isOnline: false,
         lastSeen: new Date(),
       });
-      io.emit('userOffline', { userId, lastSeen: new Date() });
+      socket.broadcast.emit('userOffline', { userId, lastSeen: new Date() });
       console.log(`User disconnected: ${socket.user.name}`);
     });
   });
